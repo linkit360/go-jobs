@@ -1,0 +1,30 @@
+server:
+  port: 50304
+  threads_count: 1
+
+operators:
+  - name: mobilink
+    retries_enabled: true
+
+  - name: yondu
+    retries_enabled: false
+
+  - name: zong
+    retries_enabled: true
+
+consumer:
+  queue_prefetch_count: 4
+  reconnect_delay: 10
+  conn:
+    user: linkit
+    pass: dg-U_oHhy7-
+    host: 35.154.8.158
+    port: 5672
+
+publisher:
+  chan_capacity: 100000
+  conn:
+    user: linkit
+    pass: dg-U_oHhy7-
+    host: 35.154.8.158
+    port: 5672
