@@ -3,12 +3,14 @@ package config
 import (
 	"flag"
 	"os"
+	"strings"
 
 	log "github.com/Sirupsen/logrus"
 	"github.com/jinzhu/configor"
 
 	"github.com/vostrok/db"
 	"github.com/vostrok/rabbit"
+	"github.com/vostrok/utils/config"
 )
 
 type ServerConfig struct {
@@ -16,16 +18,14 @@ type ServerConfig struct {
 	OperatorName string `yaml:"operator_name"`
 	ThreadsCount int    `default:"1" yaml:"threads_count"`
 }
-type QueueConfig struct {
-	NewSubscription string `default:"new_subscritpion" yaml:"new_subscritpion"`
-	Tarifficate     string `default:"tarifficate" yaml:"tarifficate"`
-}
 type AppConfig struct {
-	Server    ServerConfig          `yaml:"server"`
-	DbConf    db.DataBaseConfig     `yaml:"db"`
-	Consumer  rabbit.ConsumerConfig `yaml:"consumer"`
-	Publisher rabbit.NotifierConfig `yaml:"publisher"`
-	Queues    QueueConfig           `yaml:"queues"`
+	Name      string                                `yaml:"name"`
+	Server    ServerConfig                          `yaml:"server"`
+	DbConf    db.DataBaseConfig                     `yaml:"db"`
+	Consumer  rabbit.ConsumerConfig                 `yaml:"consumer"`
+	Notifier  rabbit.NotifierConfig                 `yaml:"publisher"`
+	Operators []config.OperatorConfig               `yaml:"operators"`
+	Queues    map[string]config.OperatorQueueConfig `yaml:"-"`
 }
 
 func LoadConfig() AppConfig {
@@ -39,9 +39,18 @@ func LoadConfig() AppConfig {
 		}
 	}
 
+	if appConfig.Name == "" {
+		log.Fatal("app name must be defiled as <host>_<name>")
+	}
+	if strings.Contains(appConfig.Name, "-") {
+		log.Fatal("app name must be without '-' : it's not a valid metric name")
+	}
+
 	appConfig.Server.Port = envString("PORT", appConfig.Server.Port)
 	appConfig.Consumer.Conn.Host = envString("RBMQ_HOST", appConfig.Consumer.Conn.Host)
-	appConfig.Publisher.Conn.Host = envString("RBMQ_HOST", appConfig.Publisher.Conn.Host)
+	appConfig.Notifier.Conn.Host = envString("RBMQ_HOST", appConfig.Notifier.Conn.Host)
+
+	appConfig.Queues = config.GetOperatorsQueue(appConfig.Operators)
 
 	log.WithField("config", appConfig).Info("Config loaded")
 	return appConfig

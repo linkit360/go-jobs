@@ -5,5 +5,5 @@ rm:
 
 build:
 	export GOOS=linux; export GOARCH=amd64; \
-  go build -ldflags "-s -w" -o bin/mo-linux-amd64 ; cp bin/mo-linux-amd64 ~/linkit
+  go build -ldflags "-s -w" -o bin/mo-linux-amd64 ; cp bin/mo-linux-amd64 ~/linkit ; cp dev/mo.yml ~/linkit/
 

@@ -14,12 +14,15 @@ import (
 
 func RunServer() {
 	appConfig := config.LoadConfig()
+	m.Init(appConfig.Name)
+
 	service.InitService(
 		appConfig.Server,
 		appConfig.DbConf,
+		appConfig.Operators,
 		appConfig.Queues,
 		appConfig.Consumer,
-		appConfig.Publisher,
+		appConfig.Notifier,
 	)
 
 	nuCPU := runtime.NumCPU()

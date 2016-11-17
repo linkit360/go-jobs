@@ -129,7 +129,7 @@ func process(deliveries <-chan amqp.Delivery) {
 			Publisher:          t.Publisher,
 		}
 
-		if err := svc.sendTarifficate("charge", r); err != nil {
+		if err := svc.sendTarifficate(r); err != nil {
 			log.WithFields(log.Fields{
 				"tid":   t.Tid,
 				"error": err.Error(),

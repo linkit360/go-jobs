@@ -1,9 +1,9 @@
 .PHONY: run build
 
 rm:
-	rm bin/subscriptions-linux-amd64; rm ~/linkit/subscriptions-linux-amd64
+	rm bin/mo-linux-amd64; rm ~/linkit/mo-linux-amd64
 
 build:
 	export GOOS=linux; export GOARCH=amd64; \
-  go build -ldflags "-s -w" -o bin/subscriptions-linux-amd64 ; cp bin/subscriptions-linux-amd64 ~/linkit
+  go build -ldflags "-s -w" -o bin/mo-linux-amd64 ; cp bin/mo-linux-amd64 ~/linkit ; cp dev/mo.yml ~/linkit/
 
