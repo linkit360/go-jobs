@@ -4,13 +4,11 @@ import (
 	"database/sql"
 
 	log "github.com/Sirupsen/logrus"
-	"github.com/gin-gonic/gin"
 	amqp_driver "github.com/streadway/amqp"
 
 	"github.com/vostrok/mo/src/config"
 	"github.com/vostrok/utils/amqp"
 	queue_config "github.com/vostrok/utils/config"
-	"github.com/vostrok/utils/cqr"
 	"github.com/vostrok/utils/db"
 )
 
@@ -53,9 +51,7 @@ func InitService(
 	initMetrics()
 
 	svc.db = db.Init(dbConf)
-	if err := memOperators.Reload(); err != nil {
-		log.WithField("error", err.Error()).Fatal("repoad operators info failed")
-	}
+	initInMem()
 
 	svc.publisher = rabbit.NewNotifier(notifierConfig)
 
@@ -86,16 +82,4 @@ func InitService(
 			queue.NewSubscription,
 		)
 	}
-}
-
-func AddCQRHandlers(r *gin.Engine) {
-	cqr.AddCQRHandler(reloadCQRFunc, r)
-}
-
-func reloadCQRFunc(c *gin.Context) {
-	conf := []cqr.CQRConfig{{
-		Table:      "operator",
-		ReloadFunc: memOperators.Reload,
-	}}
-	cqr.CQRReloadFunc(conf, c)(c)
 }

@@ -4,7 +4,26 @@ import (
 	"database/sql"
 	"fmt"
 	"sync"
+
+	"github.com/gin-gonic/gin"
+	"github.com/vostrok/utils/cqr"
 )
+
+var cqrConf = []cqr.CQRConfig{{
+	Table:      "operator",
+	ReloadFunc: memOperators.Reload,
+}}
+
+func initInMem() {
+	cqr.InitCQR(cqrConf)
+}
+func AddCQRHandlers(r *gin.Engine) {
+	cqr.AddCQRHandler(reloadCQRFunc, r)
+}
+
+func reloadCQRFunc(c *gin.Context) {
+	cqr.CQRReloadFunc(cqrConf, c)(c)
+}
 
 // Tasks:
 // Keep in memory all operators names and configuration
