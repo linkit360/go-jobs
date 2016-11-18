@@ -1,15 +1,16 @@
-name: mo_mumbai
+name: mumbai_mo
 
 server:
   port: 50303
   threads_count: 1
 
 operators:
-  - name: mobilink
-    retries_enabled: true
+  mobilink:
+  yondu:
 
-  - name: yondu
-    retries_enabled: false
+
+#  - name: yondu
+#    retries_enabled: false
 
 
 consumer:

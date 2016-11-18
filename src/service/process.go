@@ -7,13 +7,13 @@ import (
 	log "github.com/Sirupsen/logrus"
 	"github.com/streadway/amqp"
 
-	"github.com/vostrok/contentd/service"
-	rec "github.com/vostrok/mt_manager/src/service/instance"
+	content_service "github.com/vostrok/contentd/service"
+	rec "github.com/vostrok/utils/rec"
 )
 
 type EventNotifyContentSent struct {
-	EventName string                        `json:"event_name,omitempty"`
-	EventData service.ContentSentProperties `json:"event_data,omitempty"`
+	EventName string                                `json:"event_name,omitempty"`
+	EventData content_service.ContentSentProperties `json:"event_data,omitempty"`
 }
 
 func process(deliveries <-chan amqp.Delivery) {
@@ -134,7 +134,7 @@ func process(deliveries <-chan amqp.Delivery) {
 				"tid":   t.Tid,
 				"error": err.Error(),
 				"msg":   "requeue",
-			}).Error("sent charge subscription")
+			}).Error("charge subscription error")
 			// ack, since there are json marshal error possible
 		}
 		msg.Ack(false)

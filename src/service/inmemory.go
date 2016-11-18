@@ -4,9 +4,6 @@ import (
 	"database/sql"
 	"fmt"
 	"sync"
-	"time"
-
-	log "github.com/Sirupsen/logrus"
 )
 
 // Tasks:
@@ -30,26 +27,15 @@ func (ops *Operators) Reload() error {
 	ops.Lock()
 	defer ops.Unlock()
 
-	var err error
-	log.WithFields(log.Fields{}).Debug("operators reload...")
-	begin := time.Now()
-	defer func() {
-		fields := log.Fields{
-			"took": time.Since(begin),
-		}
-		if err != nil {
-			fields["error"] = err.Error()
-		}
-		log.WithFields(fields).Debug("operators reload")
-	}()
-
 	query := fmt.Sprintf("SELECT "+
 		"name, "+
+		"code, "+
 		"rps, "+
 		"settings "+
 		"FROM %soperators",
 		svc.conf.db.TablePrefix)
 	var rows *sql.Rows
+	var err error
 	rows, err = svc.db.Query(query)
 	if err != nil {
 		err = fmt.Errorf("db.Query: %s, query: %s", err.Error(), query)
@@ -59,16 +45,17 @@ func (ops *Operators) Reload() error {
 
 	var operators []Operator
 	for rows.Next() {
-		var op Operator
+		var operator Operator
 		if err = rows.Scan(
-			&op.Name,
-			&op.Rps,
-			&op.Settings,
+			&operator.Name,
+			&operator.Code,
+			&operator.Rps,
+			&operator.Settings,
 		); err != nil {
 			err = fmt.Errorf("rows.Scan: %s", err.Error())
 			return err
 		}
-		operators = append(operators, op)
+		operators = append(operators, operator)
 	}
 	if rows.Err() != nil {
 		err = fmt.Errorf("rows.Err: %s", err.Error())

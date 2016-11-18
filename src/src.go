@@ -7,9 +7,9 @@ import (
 	log "github.com/Sirupsen/logrus"
 	"github.com/gin-gonic/gin"
 
-	m "github.com/vostrok/metrics"
 	"github.com/vostrok/mo/src/config"
 	"github.com/vostrok/mo/src/service"
+	m "github.com/vostrok/utils/metrics"
 )
 
 func RunServer() {
@@ -31,6 +31,7 @@ func RunServer() {
 
 	r := gin.New()
 	m.AddHandler(r)
+	service.AddCQRHandlers(r)
 
 	r.Run(":" + appConfig.Server.Port)
 

@@ -8,9 +8,9 @@ import (
 	log "github.com/Sirupsen/logrus"
 	"github.com/jinzhu/configor"
 
-	"github.com/vostrok/db"
-	"github.com/vostrok/rabbit"
+	"github.com/vostrok/utils/amqp"
 	"github.com/vostrok/utils/config"
+	"github.com/vostrok/utils/db"
 )
 
 type ServerConfig struct {
@@ -24,7 +24,7 @@ type AppConfig struct {
 	DbConf    db.DataBaseConfig                     `yaml:"db"`
 	Consumer  rabbit.ConsumerConfig                 `yaml:"consumer"`
 	Notifier  rabbit.NotifierConfig                 `yaml:"publisher"`
-	Operators []config.OperatorConfig               `yaml:"operators"`
+	Operators map[string]config.OperatorConfig      `yaml:"operators"`
 	Queues    map[string]config.OperatorQueueConfig `yaml:"-"`
 }
 
