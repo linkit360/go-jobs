@@ -32,11 +32,11 @@ func (svc *Service) sendTarifficate(r rec.Record) error {
 		log.WithFields(log.Fields{
 			"tid":    r.Tid,
 			"msisdn": r.Msisdn,
-		}).Debug("SMS send: not enabled in mt_manager")
-		return fmt.Errorf("Name %s is not enabled", operatorName)
+		}).Debug("send tarifficate: not enabled in mo service")
+		return fmt.Errorf("operator %s is not enabled", operatorName)
 	}
 
-	event := rabbit.EventNotify{
+	event := amqp.EventNotify{
 		EventName: "charge",
 		EventData: r,
 	}
@@ -44,6 +44,12 @@ func (svc *Service) sendTarifficate(r rec.Record) error {
 	if err != nil {
 		return fmt.Errorf("json.Marshal: %s", err.Error())
 	}
-	svc.publisher.Publish(rabbit.AMQPMessage{queue.MOTarifficate, body})
+
+	log.WithFields(log.Fields{
+		"tid":    r.Tid,
+		"msisdn": r.Msisdn,
+		"queue":  queue.MOTarifficate,
+	}).Info("send tarifficate")
+	svc.publisher.Publish(amqp.AMQPMessage{queue.MOTarifficate, body})
 	return nil
 }

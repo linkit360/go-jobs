@@ -22,8 +22,8 @@ type AppConfig struct {
 	Name      string                                `yaml:"name"`
 	Server    ServerConfig                          `yaml:"server"`
 	DbConf    db.DataBaseConfig                     `yaml:"db"`
-	Consumer  rabbit.ConsumerConfig                 `yaml:"consumer"`
-	Notifier  rabbit.NotifierConfig                 `yaml:"publisher"`
+	Consumer  amqp.ConsumerConfig                   `yaml:"consumer"`
+	Notifier  amqp.NotifierConfig                   `yaml:"publisher"`
 	Operators map[string]config.OperatorConfig      `yaml:"operators"`
 	Queues    map[string]config.OperatorQueueConfig `yaml:"-"`
 }

@@ -16,8 +16,8 @@ var svc Service
 
 type Service struct {
 	conf                 Config
-	consumer             *rabbit.Consumer
-	publisher            *rabbit.Notifier
+	consumer             *amqp.Consumer
+	publisher            *amqp.Notifier
 	newSubscriptionsChan map[string]<-chan amqp_driver.Delivery
 	db                   *sql.DB
 }
@@ -27,8 +27,8 @@ type Config struct {
 	db        db.DataBaseConfig
 	operators map[string]queue_config.OperatorConfig
 	queues    map[string]queue_config.OperatorQueueConfig
-	consumer  rabbit.ConsumerConfig
-	publisher rabbit.NotifierConfig
+	consumer  amqp.ConsumerConfig
+	publisher amqp.NotifierConfig
 }
 
 func InitService(
@@ -36,8 +36,8 @@ func InitService(
 	dbConf db.DataBaseConfig,
 	operatorsConf map[string]queue_config.OperatorConfig,
 	queuesConfig map[string]queue_config.OperatorQueueConfig,
-	consumerConfig rabbit.ConsumerConfig,
-	notifierConfig rabbit.NotifierConfig,
+	consumerConfig amqp.ConsumerConfig,
+	notifierConfig amqp.NotifierConfig,
 ) {
 	log.SetLevel(log.DebugLevel)
 	svc.conf = Config{
@@ -53,30 +53,20 @@ func InitService(
 	svc.db = db.Init(dbConf)
 	initInMem()
 
-	svc.publisher = rabbit.NewNotifier(notifierConfig)
+	svc.publisher = amqp.NewNotifier(notifierConfig)
 
 	// process consumer
-	svc.consumer = rabbit.NewConsumer(consumerConfig)
+	svc.consumer = amqp.NewConsumer(consumerConfig)
 	if err := svc.consumer.Connect(); err != nil {
 		log.Fatal("rbmq consumer connect:", err.Error())
 	}
-	var err error
-	svc.newSubscriptionsChan = make(map[string]<-chan amqp_driver.Delivery, len(svc.conf.queues))
 
+	svc.newSubscriptionsChan = make(map[string]<-chan amqp_driver.Delivery, len(svc.conf.queues))
 	for operatorName, queue := range svc.conf.queues {
-		svc.newSubscriptionsChan[operatorName], err = svc.consumer.AnnounceQueue(
-			queue.NewSubscription,
-			queue.NewSubscription,
-		)
-		if err != nil {
-			log.WithFields(log.Fields{
-				"queue": queue.NewSubscription,
-				"error": err.Error(),
-			}).Fatal("rbmq consumer: AnnounceQueue")
-		}
-		go svc.consumer.Handle(
+		amqp.InitQueue(
+			svc.consumer,
 			svc.newSubscriptionsChan[operatorName],
-			process,
+			processNewSubscription,
 			serverConfig.ThreadsCount,
 			queue.NewSubscription,
 			queue.NewSubscription,
