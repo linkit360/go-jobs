@@ -18,6 +18,7 @@ func RunServer() {
 
 	service.InitService(
 		appConfig.Server,
+		appConfig.InMemClientConfig,
 		appConfig.DbConf,
 		appConfig.Operators,
 		appConfig.Queues,
@@ -31,8 +32,6 @@ func RunServer() {
 
 	r := gin.New()
 	m.AddHandler(r)
-	service.AddCQRHandlers(r)
-
 	r.Run(":" + appConfig.Server.Port)
 
 	log.WithField("port", appConfig.Server.Port).Info("mobilink init")

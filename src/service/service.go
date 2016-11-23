@@ -6,6 +6,7 @@ import (
 	log "github.com/Sirupsen/logrus"
 	amqp_driver "github.com/streadway/amqp"
 
+	inmem_client "github.com/vostrok/inmem/rpcclient"
 	"github.com/vostrok/mo/src/config"
 	"github.com/vostrok/utils/amqp"
 	queue_config "github.com/vostrok/utils/config"
@@ -33,6 +34,7 @@ type Config struct {
 
 func InitService(
 	serverConfig config.ServerConfig,
+	inMemConfig inmem_client.RPCClientConfig,
 	dbConf db.DataBaseConfig,
 	operatorsConf map[string]queue_config.OperatorConfig,
 	queuesConfig map[string]queue_config.OperatorQueueConfig,
@@ -51,7 +53,7 @@ func InitService(
 	initMetrics()
 
 	svc.db = db.Init(dbConf)
-	initInMem()
+	inmem_client.Init(inMemConfig)
 
 	svc.publisher = amqp.NewNotifier(notifierConfig)
 

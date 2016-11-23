@@ -8,6 +8,7 @@ import (
 	log "github.com/Sirupsen/logrus"
 	"github.com/jinzhu/configor"
 
+	inmem_client "github.com/vostrok/inmem/rpcclient"
 	"github.com/vostrok/utils/amqp"
 	"github.com/vostrok/utils/config"
 	"github.com/vostrok/utils/db"
@@ -19,13 +20,14 @@ type ServerConfig struct {
 	ThreadsCount int    `default:"1" yaml:"threads_count"`
 }
 type AppConfig struct {
-	Name      string                                `yaml:"name"`
-	Server    ServerConfig                          `yaml:"server"`
-	DbConf    db.DataBaseConfig                     `yaml:"db"`
-	Consumer  amqp.ConsumerConfig                   `yaml:"consumer"`
-	Notifier  amqp.NotifierConfig                   `yaml:"publisher"`
-	Operators map[string]config.OperatorConfig      `yaml:"operators"`
-	Queues    map[string]config.OperatorQueueConfig `yaml:"-"`
+	Name              string                                `yaml:"name"`
+	Server            ServerConfig                          `yaml:"server"`
+	InMemClientConfig inmem_client.RPCClientConfig          `yaml:"inmem_client"`
+	DbConf            db.DataBaseConfig                     `yaml:"db"`
+	Consumer          amqp.ConsumerConfig                   `yaml:"consumer"`
+	Notifier          amqp.NotifierConfig                   `yaml:"publisher"`
+	Operators         map[string]config.OperatorConfig      `yaml:"operators"`
+	Queues            map[string]config.OperatorQueueConfig `yaml:"-"`
 }
 
 func LoadConfig() AppConfig {

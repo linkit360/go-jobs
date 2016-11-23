@@ -4,14 +4,13 @@ server:
   port: 50303
   threads_count: 1
 
+inmem_client:
+  dsn: localhost:50307
+  timeout: 10
+
 operators:
   mobilink:
   yondu:
-
-
-#  - name: yondu
-#    retries_enabled: false
-
 
 consumer:
   queue_prefetch_count: 4
