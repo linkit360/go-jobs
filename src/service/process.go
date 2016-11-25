@@ -135,7 +135,6 @@ func processNewSubscription(deliveries <-chan amqp.Delivery) {
 				"error": err.Error(),
 				"msg":   "requeue",
 			}).Error("charge subscription error")
-			// ack, since there are json marshal error possible
 		}
 		msg.Ack(false)
 	}

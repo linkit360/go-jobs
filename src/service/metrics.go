@@ -2,6 +2,7 @@ package service
 
 import (
 	m "github.com/vostrok/utils/metrics"
+	"time"
 )
 
 var (
@@ -26,4 +27,16 @@ func initMetrics() {
 	AddToDbSuccess = m.NewGauge("", "", "add_to_db_success", "subscription add to db success")
 	OperatorNotEnabled = newGaugeOperaor("not_enabled", "operator is not enabled in config")
 	OperatorNotApplicable = newGaugeOperaor("not_applicable", "there is no such operator in database")
+
+	go func() {
+		for range time.Tick(time.Minute) {
+			Dropped.Update()
+			Empty.Update()
+			DbError.Update()
+			AddToDBErrors.Update()
+			AddToDbSuccess.Update()
+			OperatorNotEnabled.Update()
+			OperatorNotApplicable.Update()
+		}
+	}()
 }
