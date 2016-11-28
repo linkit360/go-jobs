@@ -17,7 +17,7 @@ var svc Service
 
 type Service struct {
 	conf                 Config
-	consumer             *amqp.Consumer
+	consumer             map[string]Consumers
 	publisher            *amqp.Notifier
 	newSubscriptionsChan map[string]<-chan amqp_driver.Delivery
 	db                   *sql.DB
@@ -30,6 +30,10 @@ type Config struct {
 	queues    map[string]queue_config.OperatorQueueConfig
 	consumer  amqp.ConsumerConfig
 	publisher amqp.NotifierConfig
+}
+
+type Consumers struct {
+	NewSubscription *amqp.Consumer
 }
 
 func InitService(
@@ -58,15 +62,19 @@ func InitService(
 	svc.publisher = amqp.NewNotifier(notifierConfig)
 
 	// process consumer
-	svc.consumer = amqp.NewConsumer(consumerConfig)
-	if err := svc.consumer.Connect(); err != nil {
-		log.Fatal("rbmq consumer connect:", err.Error())
-	}
-
 	svc.newSubscriptionsChan = make(map[string]<-chan amqp_driver.Delivery, len(svc.conf.queues))
+	svc.consumer = make(map[string]Consumers, len(svc.conf.queues))
 	for operatorName, queue := range svc.conf.queues {
+
+		svc.consumer[operatorName] = Consumers{
+			NewSubscription: amqp.NewConsumer(consumerConfig, queue.NewSubscription),
+		}
+		if err := svc.consumer[operatorName].NewSubscription.Connect(); err != nil {
+			log.Fatal("rbmq consumer connect:", err.Error())
+		}
+
 		amqp.InitQueue(
-			svc.consumer,
+			svc.consumer[operatorName].NewSubscription,
 			svc.newSubscriptionsChan[operatorName],
 			processNewSubscription,
 			serverConfig.ThreadsCount,
