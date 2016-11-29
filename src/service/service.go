@@ -57,7 +57,9 @@ func InitService(
 	initMetrics()
 
 	svc.db = db.Init(dbConf)
-	inmem_client.Init(inMemConfig)
+	if err := inmem_client.Init(inMemConfig); err != nil {
+		log.Fatal("cann't init inmemory service")
+	}
 
 	svc.publisher = amqp.NewNotifier(notifierConfig)
 
