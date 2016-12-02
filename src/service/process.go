@@ -15,6 +15,10 @@ type EventNotifyContentSent struct {
 	EventName string                                `json:"event_name,omitempty"`
 	EventData content_service.ContentSentProperties `json:"event_data,omitempty"`
 }
+type EventNotifyNewSubscription struct {
+	EventName string     `json:"event_name,omitempty"`
+	EventData rec.Record `json:"event_data,omitempty"`
+}
 
 func processNewSubscription(deliveries <-chan amqp.Delivery) {
 	for msg := range deliveries {
@@ -25,18 +29,49 @@ func processNewSubscription(deliveries <-chan amqp.Delivery) {
 			Dropped.Inc()
 
 			log.WithFields(log.Fields{
-				"error":       err.Error(),
-				"msg":         "dropped",
-				"contentSent": string(msg.Body),
-			}).Error("consume content sent")
+				"error": err.Error(),
+				"msg":   "dropped",
+				"body":  string(msg.Body),
+			}).Error("consume new subscription")
 			msg.Ack(false)
 			continue
 		}
-		t := e.EventData
 
-		if t.Msisdn == "" ||
-			t.CampaignId == 0 ||
-			t.ContentId == 0 {
+		r := rec.Record{
+			Msisdn:             e.EventData.Msisdn,
+			Tid:                e.EventData.Tid,
+			SubscriptionStatus: "",
+			OperatorCode:       e.EventData.OperatorCode,
+			CountryCode:        e.EventData.CountryCode,
+			ServiceId:          e.EventData.ServiceId,
+			SubscriptionId:     e.EventData.SubscriptionId,
+			CampaignId:         e.EventData.CampaignId,
+			AttemptsCount:      0,
+			DelayHours:         e.EventData.DelayHours,
+			Pixel:              e.EventData.Pixel,
+			Publisher:          e.EventData.Publisher,
+		}
+		if e.EventData.Type == "rec" {
+			var ns EventNotifyNewSubscription
+			if err := json.Unmarshal(msg.Body, &ns); err != nil {
+				Dropped.Inc()
+
+				log.WithFields(log.Fields{
+					"error": err.Error(),
+					"msg":   "dropped",
+					"body":  string(msg.Body),
+				}).Error("consume new subscription")
+				msg.Ack(false)
+				continue
+			}
+			r = ns.EventData
+		} else {
+			log.WithFields(log.Fields{
+				"tid": e.EventData.Tid,
+			}).Debug("use content sent properties")
+		}
+
+		if r.Msisdn == "" || r.CampaignId == 0 {
 			Dropped.Inc()
 			Empty.Inc()
 
@@ -48,22 +83,21 @@ func processNewSubscription(deliveries <-chan amqp.Delivery) {
 			msg.Ack(false)
 			continue
 		}
-		// todo: add check for every field
-		if len(t.Msisdn) > 32 {
+
+		if len(r.Msisdn) > 32 {
 			log.WithFields(log.Fields{
-				"tid":    t.Tid,
-				"msisdn": t.Msisdn,
+				"tid":    r.Tid,
+				"msisdn": r.Msisdn,
 				"error":  "too long msisdn",
 			}).Error("strange msisdn, truncating")
-			t.Msisdn = t.Msisdn[:31]
+			r.Msisdn = r.Msisdn[:31]
 		}
-		if t.SubscriptionId > 0 {
+
+		if r.SubscriptionId > 0 {
 			log.WithFields(log.Fields{
-				"tid":    t.Tid,
-				"msisdn": t.Msisdn,
-				"error":  "already hash subscription id",
-				"msg":    "dropped",
-			}).Error("consume new subscritpion")
+				"tid":    r.Tid,
+				"msisdn": r.Msisdn,
+			}).Debug("already has subscription id")
 		} else {
 			// do not set id_subscriber: msisdn is enough
 			query := fmt.Sprintf("INSERT INTO %ssubscriptions ( "+
@@ -85,23 +119,23 @@ func processNewSubscription(deliveries <-chan amqp.Delivery) {
 
 			if err := svc.db.QueryRow(query,
 				"",
-				t.CampaignId,
-				t.ServiceId,
-				t.Msisdn,
-				t.Publisher,
-				t.Pixel,
-				t.Tid,
-				t.CountryCode,
-				t.OperatorCode,
-				t.PaidHours,
-				t.DelayHours,
-				t.Price,
-			).Scan(&t.SubscriptionId); err != nil {
+				r.CampaignId,
+				r.ServiceId,
+				r.Msisdn,
+				r.Publisher,
+				r.Pixel,
+				r.Tid,
+				r.CountryCode,
+				r.OperatorCode,
+				r.PaidHours,
+				r.DelayHours,
+				r.Price,
+			).Scan(&r.SubscriptionId); err != nil {
 				DbError.Inc()
 				AddToDBErrors.Inc()
 
 				log.WithFields(log.Fields{
-					"tid":   t.Tid,
+					"tid":   r.Tid,
 					"error": err.Error(),
 					"query": query,
 					"msg":   "requeue",
@@ -111,30 +145,18 @@ func processNewSubscription(deliveries <-chan amqp.Delivery) {
 			}
 			AddToDbSuccess.Inc()
 			log.WithFields(log.Fields{
-				"tid": t.Tid,
+				"tid": r.Tid,
 			}).Info("added new subscription")
-		}
-		r := rec.Record{
-			Msisdn:             t.Msisdn,
-			Tid:                t.Tid,
-			SubscriptionStatus: "",
-			OperatorCode:       t.OperatorCode,
-			CountryCode:        t.CountryCode,
-			ServiceId:          t.ServiceId,
-			SubscriptionId:     t.SubscriptionId,
-			CampaignId:         t.CampaignId,
-			AttemptsCount:      0,
-			DelayHours:         t.DelayHours,
-			Pixel:              t.Pixel,
-			Publisher:          t.Publisher,
 		}
 
 		if err := svc.sendTarifficate(r); err != nil {
+			NotifyErrors.Inc()
 			log.WithFields(log.Fields{
-				"tid":   t.Tid,
+				"tid":   r.Tid,
 				"error": err.Error(),
-				"msg":   "requeue",
+				"msg":   "dropped",
 			}).Error("charge subscription error")
+
 		}
 		msg.Ack(false)
 	}

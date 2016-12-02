@@ -59,7 +59,7 @@ func (svc *Service) sendTarifficate(r rec.Record) error {
 		"tid":    r.Tid,
 		"msisdn": r.Msisdn,
 		"queue":  queue.MOTarifficate,
-	}).Info("send tarifficate")
+	}).Info("send")
 	svc.publisher.Publish(amqp.AMQPMessage{queue.MOTarifficate, 0, body})
 	return nil
 }

@@ -13,6 +13,7 @@ var (
 	AddToDbSuccess        m.Gauge
 	OperatorNotEnabled    m.Gauge
 	OperatorNotApplicable m.Gauge
+	NotifyErrors          m.Gauge
 )
 
 func newGaugeOperaor(name, help string) m.Gauge {
@@ -27,6 +28,7 @@ func initMetrics() {
 	AddToDbSuccess = m.NewGauge("", "", "add_to_db_success", "subscription add to db success")
 	OperatorNotEnabled = newGaugeOperaor("not_enabled", "operator is not enabled in config")
 	OperatorNotApplicable = newGaugeOperaor("not_applicable", "there is no such operator in database")
+	NotifyErrors = m.NewGauge("", "", "notify_errors", "sent to mt manager queue error")
 
 	go func() {
 		for range time.Tick(time.Minute) {
@@ -37,6 +39,7 @@ func initMetrics() {
 			AddToDbSuccess.Update()
 			OperatorNotEnabled.Update()
 			OperatorNotApplicable.Update()
+			NotifyErrors.Update()
 		}
 	}()
 }
