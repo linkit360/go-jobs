@@ -28,23 +28,15 @@ func api(c *gin.Context) {
 	limitStr, _ := c.GetQuery("limit")
 	limit, err := strconv.Atoi(limitStr)
 	if err != nil || limitStr == "" {
-		if err == nil && limitStr == "" {
-			err = fmt.Errorf("Reqquired param: %s", "limit")
-		}
-
-		c.JSON(500, err.Error())
-		return
+		log.WithFields(log.Fields{}).Debug("no required param limit, so use 1000")
+		limit = 1000
 	}
 
 	hoursStr, _ := c.GetQuery("hours")
 	hours, err := strconv.Atoi(hoursStr)
 	if err != nil || hoursStr == "" {
-		if err == nil && hoursStr == "" {
-			err = fmt.Errorf("Reqquired param: %s", "hours")
-		}
-
-		c.JSON(500, err.Error())
-		return
+		log.WithFields(log.Fields{}).Debug("no required param, so use 1 hour")
+		hours = 1
 	}
 
 	params := Params{
@@ -64,8 +56,9 @@ func processOldNotPaidSubscriptions(p Params) (count int, err error) {
 	begin := time.Now()
 	defer func() {
 		log.WithFields(log.Fields{
-			"took":  time.Since(begin),
-			"count": count,
+			"took":   time.Since(begin),
+			"count":  count,
+			"params": p,
 		}).Debug("get notpaid subscriptions")
 	}()
 
@@ -86,7 +79,7 @@ func processOldNotPaidSubscriptions(p Params) (count int, err error) {
 		" FROM %ssubscriptions "+
 		" WHERE result = '' AND "+
 		" (CURRENT_TIMESTAMP - %d * INTERVAL '1 hour' ) > created_at "+
-		" ORDER BY id DESC LIMIT %s",
+		" ORDER BY id ASC LIMIT %s",
 		svc.conf.db.TablePrefix,
 		p.Hours,
 		strconv.Itoa(p.Limit),
