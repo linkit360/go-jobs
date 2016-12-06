@@ -22,6 +22,7 @@ consumer:
     port: 5672
 
 publisher:
+  pending_buffer_path: /home/centos/linkit/mo_pending.json
   chan_capacity: 100000
   conn:
     user: linkit

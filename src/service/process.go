@@ -126,8 +126,8 @@ func processNewSubscription(deliveries <-chan amqp.Delivery) {
 				"error": err.Error(),
 				"msg":   "dropped",
 			}).Error("charge subscription error")
-
 		}
+
 	ack:
 		if err := msg.Ack(false); err != nil {
 			log.WithFields(log.Fields{
