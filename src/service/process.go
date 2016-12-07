@@ -64,6 +64,7 @@ func processNewSubscription(deliveries <-chan amqp.Delivery) {
 		} else {
 			// do not set id_subscriber: msisdn is enough
 			query := fmt.Sprintf("INSERT INTO %ssubscriptions ( "+
+				"sent_at, "+
 				"result, "+
 				"id_campaign, "+
 				"id_service, "+
@@ -76,11 +77,12 @@ func processNewSubscription(deliveries <-chan amqp.Delivery) {
 				"paid_hours, "+
 				"delay_hours, "+
 				"price "+
-				") values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) "+
+				") values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) "+
 				"RETURNING id",
 				svc.conf.db.TablePrefix)
 
 			if err := svc.db.QueryRow(query,
+				r.SentAt,
 				"",
 				r.CampaignId,
 				r.ServiceId,
