@@ -21,6 +21,7 @@ func processNewSubscription(deliveries <-chan amqp.Delivery) {
 		log.WithField("body", string(msg.Body)).Debug("start process")
 
 		var ns EventNotifyNewSubscription
+		var r rec.Record
 		if err := json.Unmarshal(msg.Body, &ns); err != nil {
 			Dropped.Inc()
 
@@ -32,7 +33,7 @@ func processNewSubscription(deliveries <-chan amqp.Delivery) {
 			goto ack
 		}
 
-		r := ns.EventData
+		r = ns.EventData
 
 		if r.Msisdn == "" || r.CampaignId == 0 {
 			Dropped.Inc()
