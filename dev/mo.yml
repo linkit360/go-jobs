@@ -3,17 +3,22 @@ name: mumbai_mo
 server:
   port: 50303
   threads_count: 1
+  queue_prefetch_count: 4
 
 inmem_client:
-  port: 50307
   timeout: 10
 
-operators:
+consume_queues:
   mobilink:
+    name: mobilink_new_subscription
+    prefetch_count: 10
+    threads_count: 10
   yondu:
+    name: yondu_new_subscription
+    prefetch_count: 10
+    threads_count: 10
 
 consumer:
-  queue_prefetch_count: 4
   reconnect_delay: 10
   conn:
     user: linkit

@@ -76,8 +76,9 @@ func processNewSubscription(deliveries <-chan amqp.Delivery) {
 				"operator_code, "+
 				"paid_hours, "+
 				"delay_hours, "+
+				"keep_days, "+
 				"price "+
-				") values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) "+
+				") values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14) "+
 				"RETURNING id",
 				svc.conf.db.TablePrefix)
 
@@ -94,6 +95,7 @@ func processNewSubscription(deliveries <-chan amqp.Delivery) {
 				r.OperatorCode,
 				r.PaidHours,
 				r.DelayHours,
+				r.KeepDays,
 				r.Price,
 			).Scan(&r.SubscriptionId); err != nil {
 				DbError.Inc()

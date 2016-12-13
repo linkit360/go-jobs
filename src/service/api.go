@@ -75,6 +75,7 @@ func processOldNotPaidSubscriptions(p Params) (count int, err error) {
 		"attempts_count, "+
 		"delay_hours, "+
 		"paid_hours, "+
+		"keep_days, "+
 		"price "+
 		" FROM %ssubscriptions "+
 		" WHERE result = '' AND "+
@@ -110,6 +111,7 @@ func processOldNotPaidSubscriptions(p Params) (count int, err error) {
 			&record.AttemptsCount,
 			&record.DelayHours,
 			&record.PaidHours,
+			&record.KeepDays,
 			&record.Price,
 		); err != nil {
 			DbError.Inc()

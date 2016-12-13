@@ -9,6 +9,7 @@ import (
 
 	inmem_client "github.com/vostrok/inmem/rpcclient"
 	"github.com/vostrok/utils/amqp"
+	"github.com/vostrok/utils/config"
 	rec "github.com/vostrok/utils/rec"
 )
 
@@ -26,18 +27,8 @@ func (svc *Service) sendTarifficate(r rec.Record) error {
 		return err
 	}
 	operatorName := strings.ToLower(operator.Name)
-	queue, ok := svc.conf.queues[operatorName]
-	if !ok {
-		OperatorNotEnabled.Inc()
 
-		err = fmt.Errorf("operator %s is not enabled", operatorName)
-		log.WithFields(log.Fields{
-			"tid":    r.Tid,
-			"msisdn": r.Msisdn,
-			"error":  err.Error(),
-		}).Error("send tarifficate: not enabled in mo service")
-		return err
-	}
+	queue := config.GetSendInMTManagerMOQueueName(operatorName)
 
 	event := amqp.EventNotify{
 		EventName: "charge",
@@ -58,8 +49,8 @@ func (svc *Service) sendTarifficate(r rec.Record) error {
 	log.WithFields(log.Fields{
 		"tid":    r.Tid,
 		"msisdn": r.Msisdn,
-		"queue":  queue.MOTarifficate,
+		"queue":  queue,
 	}).Info("send")
-	svc.publisher.Publish(amqp.AMQPMessage{queue.MOTarifficate, 0, body})
+	svc.publisher.Publish(amqp.AMQPMessage{queue, 0, body})
 	return nil
 }
