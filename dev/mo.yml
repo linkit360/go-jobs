@@ -10,13 +10,13 @@ inmem_client:
 
 consume_queues:
   mobilink:
-    name: mobilink_new_subscription
+    name: mobilink_new_subscriptions
     prefetch_count: 10
     threads_count: 10
-  yondu:
-    name: yondu_new_subscription
-    prefetch_count: 10
-    threads_count: 10
+#  yondu:
+#    name: yondu_new_subscription
+#    prefetch_count: 10
+#    threads_count: 10
 
 consumer:
   reconnect_delay: 10

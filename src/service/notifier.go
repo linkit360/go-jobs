@@ -28,7 +28,7 @@ func (svc *Service) sendTarifficate(r rec.Record) error {
 	}
 	operatorName := strings.ToLower(operator.Name)
 
-	queue := config.GetSendInMTManagerMOQueueName(operatorName)
+	queue := config.GetMOQueueName(operatorName)
 
 	event := amqp.EventNotify{
 		EventName: "charge",
