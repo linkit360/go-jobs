@@ -4,8 +4,12 @@ package service
 
 import (
 	"database/sql"
+	"fmt"
+	"strconv"
+	"time"
 
 	log "github.com/Sirupsen/logrus"
+	cache "github.com/patrickmn/go-cache"
 	amqp_driver "github.com/streadway/amqp"
 
 	inmem_client "github.com/vostrok/inmem/rpcclient"
@@ -13,32 +17,56 @@ import (
 	"github.com/vostrok/utils/amqp"
 	queue_config "github.com/vostrok/utils/config"
 	"github.com/vostrok/utils/db"
+	"github.com/vostrok/utils/rec"
 )
 
 var svc Service
 
 type Service struct {
 	conf                 Config
-	consumer             map[string]*amqp.Consumer
+	consumer             Consumers
+	channels             Channels
 	publisher            *amqp.Notifier
 	newSubscriptionsChan map[string]<-chan amqp_driver.Delivery
 	db                   *sql.DB
+	prevCache            *cache.Cache
 }
 
 type Config struct {
 	server    config.ServerConfig
 	db        db.DataBaseConfig
 	operators map[string]struct{}
-	queues    map[string]queue_config.ConsumeQueueConfig
+	queues    QueuesConfig
 	consumer  amqp.ConsumerConfig
 	publisher amqp.NotifierConfig
+}
+
+type QueuesConfig struct {
+	TransactionLog string                          `yaml:"transaction_log" default:"transaction_log"`
+	Mobilink       queue_config.ConsumeQueueConfig `yaml:"mobilink"`
+	Yondu          YonduQueueConfig                `yaml:"yondu"`
+}
+type YonduQueueConfig struct {
+	NewSubscription queue_config.ConsumeQueueConfig `yaml:"new"`
+	SentConsent     string                          `yaml:"sent_consent"`
+	MT              string                          `yaml:"mt"`
+}
+
+type Consumers struct {
+	Mobilink *amqp.Consumer
+	Yondu    *amqp.Consumer
+}
+
+type Channels struct {
+	Mobilink <-chan amqp_driver.Delivery
+	Yondu    <-chan amqp_driver.Delivery
 }
 
 func InitService(
 	serverConfig config.ServerConfig,
 	inMemConfig inmem_client.RPCClientConfig,
 	dbConf db.DataBaseConfig,
-	queuesConfig map[string]queue_config.ConsumeQueueConfig,
+	queuesConfig QueuesConfig,
 	consumerConfig amqp.ConsumerConfig,
 	notifierConfig amqp.NotifierConfig,
 ) {
@@ -51,6 +79,7 @@ func InitService(
 		publisher: notifierConfig,
 	}
 	initMetrics()
+	initCache()
 
 	svc.db = db.Init(dbConf)
 	if err := inmem_client.Init(inMemConfig); err != nil {
@@ -60,27 +89,155 @@ func InitService(
 	svc.publisher = amqp.NewNotifier(notifierConfig)
 
 	svc.newSubscriptionsChan = make(map[string]<-chan amqp_driver.Delivery, len(svc.conf.queues))
-	svc.consumer = make(map[string]*amqp.Consumer, len(svc.conf.queues))
+	svc.consumer = Consumers{}
 
-	for operatorName, queue := range svc.conf.queues {
-
-		svc.consumer[operatorName] = amqp.NewConsumer(
+	if queuesConfig.Mobilink.Enabled {
+		svc.consumer.Mobilink = amqp.NewConsumer(
 			consumerConfig,
-			queue.Name,
-			queue.PrefetchCount,
+			queuesConfig.Mobilink.Name,
+			queuesConfig.Mobilink.PrefetchCount,
 		)
 
-		if err := svc.consumer[operatorName].Connect(); err != nil {
+		if err := svc.consumer.Mobilink.Connect(); err != nil {
 			log.Fatal("rbmq consumer connect:", err.Error())
 		}
 
 		amqp.InitQueue(
-			svc.consumer[operatorName],
-			svc.newSubscriptionsChan[operatorName],
-			processNewSubscription,
+			svc.consumer.Mobilink,
+			svc.channels.Mobilink,
+			processNewMobilinkSubscription,
 			serverConfig.ThreadsCount,
-			queue.Name,
-			queue.Name,
+			queuesConfig.Mobilink.Name,
+			queuesConfig.Mobilink.Name,
 		)
+	}
+
+	if queuesConfig.Yondu.NewSubscription.Enabled {
+		svc.consumer.Yondu = amqp.NewConsumer(
+			consumerConfig,
+			queuesConfig.Yondu.NewSubscription.Name,
+			queuesConfig.Yondu.NewSubscription.PrefetchCount,
+		)
+
+		if err := svc.consumer.Yondu.Connect(); err != nil {
+			log.Fatal("rbmq consumer connect:", err.Error())
+		}
+
+		amqp.InitQueue(
+			svc.consumer.Yondu,
+			svc.channels.Yondu,
+			processNewYonduSubscription,
+			serverConfig.ThreadsCount,
+			queuesConfig.Yondu.NewSubscription.Name,
+			queuesConfig.Yondu.NewSubscription.Name,
+		)
+	}
+
+}
+
+func addNewSubscriptionToDB(r *rec.Record) error {
+	if r.SubscriptionId > 0 {
+		log.WithFields(log.Fields{
+			"tid":    r.Tid,
+			"msisdn": r.Msisdn,
+		}).Debug("already has subscription id")
+		return nil
+	}
+	if len(r.Msisdn) > 32 {
+		log.WithFields(log.Fields{
+			"tid":    r.Tid,
+			"msisdn": r.Msisdn,
+			"error":  "too long msisdn",
+		}).Error("strange msisdn, truncating")
+		r.Msisdn = r.Msisdn[:31]
+	}
+
+	begin := time.Now()
+	query := fmt.Sprintf("INSERT INTO %ssubscriptions ( "+
+		"sent_at, "+
+		"result, "+
+		"id_campaign, "+
+		"id_service, "+
+		"msisdn, "+
+		"publisher, "+
+		"pixel, "+
+		"tid, "+
+		"country_code, "+
+		"operator_code, "+
+		"paid_hours, "+
+		"delay_hours, "+
+		"keep_days, "+
+		"price "+
+		") values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14) "+
+		"RETURNING id",
+		svc.conf.db.TablePrefix)
+
+	if err := svc.db.QueryRow(query,
+		r.SentAt,
+		"",
+		r.CampaignId,
+		r.ServiceId,
+		r.Msisdn,
+		r.Publisher,
+		r.Pixel,
+		r.Tid,
+		r.CountryCode,
+		r.OperatorCode,
+		r.PaidHours,
+		r.DelayHours,
+		r.KeepDays,
+		r.Price,
+	).Scan(&r.SubscriptionId); err != nil {
+		DbError.Inc()
+		AddToDBErrors.Inc()
+
+		err = fmt.Errorf("db.Scan: %s", err.Error())
+		log.WithFields(log.Fields{
+			"tid":   r.Tid,
+			"error": err.Error(),
+			"query": query,
+			"msg":   "requeue",
+		}).Error("add new subscription")
+		return err
+	}
+
+	AddToDbSuccess.Inc()
+	log.WithFields(log.Fields{
+		"tid":  r.Tid,
+		"took": time.Since(begin).Seconds(),
+	}).Info("added new subscription")
+	return nil
+}
+func initCache() {
+	prev, err := rec.LoadPreviousSubscriptions()
+	if err != nil {
+		log.WithField("error", err.Error()).Fatal("cannot load previous subscriptions")
+	}
+	log.WithField("count", len(prev)).Debug("loaded previous subscriptions")
+	svc.prevCache = cache.New(24*time.Hour, time.Minute)
+	for _, v := range prev {
+		key := v.Msisdn + strconv.FormatInt(v.ServiceId, 10)
+		svc.prevCache.Set(key, struct{}{}, time.Now().Sub(v.CreatedAt))
+	}
+}
+func getPrevSubscriptionCache(msisdn string, serviceId int64, tid string) bool {
+	key := msisdn + strconv.FormatInt(serviceId, 10)
+	_, found := svc.prevCache.Get(key)
+	log.WithFields(log.Fields{
+		"tid":   tid,
+		"key":   key,
+		"found": found,
+	}).Debug("get previous subscription cache")
+	return found
+}
+func setPrevSubscriptionCache(msisdn string, serviceId int64, tid string) {
+	key := msisdn + strconv.FormatInt(serviceId, 10)
+	_, found := svc.prevCache.Get(key)
+	if !found {
+		svc.prevCache.Set(key, struct{}{}, 24*time.Hour)
+		log.WithFields(log.Fields{
+			"tid": tid,
+			"key": key,
+		}).Debug("set previous subscription cache")
 	}
 }

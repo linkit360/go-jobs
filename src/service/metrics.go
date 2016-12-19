@@ -6,6 +6,7 @@ import (
 )
 
 var (
+	Errors                m.Gauge
 	Dropped               m.Gauge
 	Empty                 m.Gauge
 	DbError               m.Gauge
@@ -14,7 +15,23 @@ var (
 	OperatorNotEnabled    m.Gauge
 	OperatorNotApplicable m.Gauge
 	NotifyErrors          m.Gauge
+	Mobilink              MobilinkMetrics
+	Yondu                 YonduMetrics
 )
+
+type YonduMetrics struct {
+	BlackListed            m.Gauge
+	Rejected               m.Gauge
+	Dropped                m.Gauge
+	MOCallUnknownCampaign  m.Gauge
+	MOCallUnknownService   m.Gauge
+	MOCallUnknownPublisher m.Gauge
+	MOCallParseTimeError   m.Gauge
+}
+
+type MobilinkMetrics struct {
+	Dropped m.Gauge
+}
 
 func newGaugeOperaor(name, help string) m.Gauge {
 	return m.NewGauge("", "operator", name, "operator "+help)
@@ -30,6 +47,20 @@ func initMetrics() {
 	OperatorNotApplicable = newGaugeOperaor("not_applicable", "there is no such operator in database")
 	NotifyErrors = m.NewGauge("", "", "notify_errors", "sent to mt manager queue error")
 
+	Yondu := YonduMetrics{
+		BlackListed:            m.NewGauge("", "yondu", "blacklisted", "yondu blacklisted"),
+		Rejected:               m.NewGauge("", "yondu", "rejected", "yondu rejected"),
+		Dropped:                m.NewGauge("", "yondu", "dropped", "yondu dropped"),
+		MOCallUnknownCampaign:  m.NewGauge("", "api_in", "mo_call_unknown_campaign", "MO unknown campaign"),
+		MOCallUnknownService:   m.NewGauge("", "api_in", "mo_call_unknown_service", "MO unknown service"),
+		MOCallUnknownPublisher: m.NewGauge("", "api_in", "mo_call_unknown_pixel_setting", "MO unknown pixel setting"),
+		MOCallParseTimeError:   m.NewGauge("", "api_in", "mo_call_parse_time_error", "MO parse operators time error"),
+	}
+
+	Mobilink := MobilinkMetrics{
+		Dropped: m.NewGauge("", "mobilink", "dropped", "mobilink dropped"),
+	}
+
 	go func() {
 		for range time.Tick(time.Minute) {
 			Dropped.Update()
@@ -40,6 +71,15 @@ func initMetrics() {
 			OperatorNotEnabled.Update()
 			OperatorNotApplicable.Update()
 			NotifyErrors.Update()
+			Yondu.BlackListed.Update()
+			Yondu.Rejected.Update()
+			Yondu.Dropped.Update()
+			Yondu.MOCallUnknownCampaign.Update()
+			Yondu.MOCallUnknownService.Update()
+			Yondu.MOCallUnknownPublisher.Update()
+			Yondu.MOCallParseTimeError.Update()
+
+			Mobilink.Dropped.Update()
 		}
 	}()
 }
