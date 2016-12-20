@@ -3,7 +3,6 @@ package service
 import (
 	"encoding/json"
 	"fmt"
-	"strings"
 	"time"
 
 	log "github.com/Sirupsen/logrus"
@@ -22,6 +21,12 @@ type EventNotifyMO struct {
 
 func processNewYonduSubscription(deliveries <-chan amqp.Delivery) {
 	for msg := range deliveries {
+		var r rec.Record
+		var err error
+		var logCtx *log.Entry
+		var blackListed bool
+		var hasPrevious bool
+		var transactionMsg transaction_log_service.OperatorTransactionLog
 
 		log.WithFields(log.Fields{
 			"priority": msg.Priority,
@@ -40,17 +45,17 @@ func processNewYonduSubscription(deliveries <-chan amqp.Delivery) {
 			goto ack
 		}
 
-		r, err := getRecordByMO(e.EventData)
+		r, err = getRecordByMO(e.EventData)
 		if err != nil {
 			msg.Nack(false, true)
 			continue
 		}
-		logCtx := log.WithFields(log.Fields{
+		logCtx = log.WithFields(log.Fields{
 			"tid":    r.Tid,
 			"msisdn": r.Msisdn,
 		})
 		logCtx.Debug("blacklist checks..")
-		blackListed, err := inmem_client.IsBlackListed(r.Msisdn)
+		blackListed, err = inmem_client.IsBlackListed(r.Msisdn)
 		if err != nil {
 			Errors.Inc()
 
@@ -66,7 +71,7 @@ func processNewYonduSubscription(deliveries <-chan amqp.Delivery) {
 			logCtx.Debug("not blacklisted, start postpaid checks..")
 		}
 
-		hasPrevious := getPrevSubscriptionCache(r.Msisdn, r.ServiceId, r.Tid)
+		hasPrevious = getPrevSubscriptionCache(r.Msisdn, r.ServiceId, r.Tid)
 		if hasPrevious {
 			Yondu.Rejected.Inc()
 
@@ -77,13 +82,16 @@ func processNewYonduSubscription(deliveries <-chan amqp.Delivery) {
 			logCtx.Debug("no previous subscription found")
 		}
 		// here get subscription id
-		if err := addNewSubscriptionToDB(r); err != nil {
+		if err := rec.AddNewSubscriptionToDB(&r); err != nil {
+			Yondu.AddToDBErrors.Inc()
 			msg.Nack(false, true)
 			continue
+		} else {
+			Yondu.AddToDbSuccess.Inc()
 		}
 		setPrevSubscriptionCache(r.Msisdn, r.ServiceId, r.Tid)
 
-		transactionMsg := transaction_log_service.OperatorTransactionLog{
+		transactionMsg = transaction_log_service.OperatorTransactionLog{
 			Tid:              r.Tid,
 			Msisdn:           r.Msisdn,
 			OperatorToken:    r.OperatorToken,
@@ -94,10 +102,10 @@ func processNewYonduSubscription(deliveries <-chan amqp.Delivery) {
 			ServiceId:        r.ServiceId,
 			SubscriptionId:   r.SubscriptionId,
 			CampaignId:       r.CampaignId,
-			RequestBody:      strings.TrimSpace(msg.Body),
+			RequestBody:      string(msg.Body),
 			ResponseBody:     "",
 			ResponseDecision: "",
-			ResponseCode:     "",
+			ResponseCode:     200,
 			SentAt:           r.SentAt,
 			Type:             e.EventName,
 		}
@@ -188,8 +196,8 @@ func getRecordByMO(req yondu_service.MOParameters) (rec.Record, error) {
 		Msisdn:             req.Msisdn,
 		Tid:                rec.GenerateTID(),
 		SubscriptionStatus: "",
-		CountryCode:        "ph",
-		OperatorCode:       "51000",
+		CountryCode:        515, // ph
+		OperatorCode:       51500,
 		Publisher:          publisher,
 		Pixel:              "",
 		CampaignId:         campaign.Id,

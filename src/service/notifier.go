@@ -9,6 +9,7 @@ import (
 	log "github.com/Sirupsen/logrus"
 
 	inmem_client "github.com/vostrok/inmem/rpcclient"
+	transaction_log_service "github.com/vostrok/qlistener/src/service"
 	"github.com/vostrok/utils/amqp"
 	"github.com/vostrok/utils/config"
 	rec "github.com/vostrok/utils/rec"
@@ -18,6 +19,7 @@ func (svc *Service) sendTarifficate(r rec.Record) error {
 	operator, err := inmem_client.GetOperatorByCode(r.OperatorCode)
 	if err != nil {
 		OperatorNotApplicable.Inc()
+		NotifyErrors.Inc()
 
 		err = fmt.Errorf("Cannot get operator by code: %d, error: %s", r.OperatorCode, err.Error())
 		log.WithFields(log.Fields{
@@ -37,6 +39,7 @@ func (svc *Service) sendTarifficate(r rec.Record) error {
 	}
 	body, err := json.Marshal(event)
 	if err != nil {
+		NotifyErrors.Inc()
 
 		err = fmt.Errorf("json.Marshal: %s", err.Error())
 		log.WithFields(log.Fields{
@@ -56,14 +59,17 @@ func (svc *Service) sendTarifficate(r rec.Record) error {
 	return nil
 }
 
-func (svc *Service) publishTransactionLog(eventName string, r rec.Record) error {
-	r.SentAt = time.Now().UTC()
+func (svc *Service) publishTransactionLog(eventName string,
+	transactionMsg transaction_log_service.OperatorTransactionLog) error {
+	transactionMsg.SentAt = time.Now().UTC()
 	event := amqp.EventNotify{
 		EventName: eventName,
-		EventData: r,
+		EventData: transactionMsg,
 	}
 	body, err := json.Marshal(event)
 	if err != nil {
+		NotifyErrors.Inc()
+
 		return fmt.Errorf("json.Marshal: %s", err.Error())
 	}
 	svc.publisher.Publish(amqp.AMQPMessage{svc.conf.queues.TransactionLog, 0, body})
@@ -78,6 +84,8 @@ func (svc *Service) publishYonduSentConsent(r rec.Record) error {
 	}
 	body, err := json.Marshal(event)
 	if err != nil {
+		NotifyErrors.Inc()
+
 		return fmt.Errorf("json.Marshal: %s", err.Error())
 	}
 	svc.publisher.Publish(amqp.AMQPMessage{svc.conf.queues.Yondu.SentConsent, 0, body})
@@ -91,6 +99,8 @@ func (svc *Service) publishYonduMT(r rec.Record) error {
 	}
 	body, err := json.Marshal(event)
 	if err != nil {
+		NotifyErrors.Inc()
+
 		return fmt.Errorf("json.Marshal: %s", err.Error())
 	}
 	svc.publisher.Publish(amqp.AMQPMessage{svc.conf.queues.Yondu.MT, 0, body})

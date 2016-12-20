@@ -10,7 +10,7 @@ import (
 
 	inmem_client "github.com/vostrok/inmem/rpcclient"
 	"github.com/vostrok/utils/amqp"
-	"github.com/vostrok/utils/config"
+	queue_config "github.com/vostrok/utils/config"
 	"github.com/vostrok/utils/db"
 )
 
@@ -21,13 +21,26 @@ type ServerConfig struct {
 }
 
 type AppConfig struct {
-	Name              string                               `yaml:"name"`
-	Server            ServerConfig                         `yaml:"server"`
-	InMemClientConfig inmem_client.RPCClientConfig         `yaml:"inmem_client"`
-	DbConf            db.DataBaseConfig                    `yaml:"db"`
-	ConsumeQueues     map[string]config.ConsumeQueueConfig `yaml:"consume_queues"`
-	Consumer          amqp.ConsumerConfig                  `yaml:"consumer"`
-	Notifier          amqp.NotifierConfig                  `yaml:"publisher"`
+	MetricInstancePrefix string                       `yaml:"metric_instance_prefix"`
+	AppName              string                       `yaml:"app_name"`
+	Server               ServerConfig                 `yaml:"server"`
+	InMemClientConfig    inmem_client.RPCClientConfig `yaml:"inmem_client"`
+	DbConf               db.DataBaseConfig            `yaml:"db"`
+	ConsumeQueues        QueuesConfig                 `yaml:"queues"`
+	Consumer             amqp.ConsumerConfig          `yaml:"consumer"`
+	Notifier             amqp.NotifierConfig          `yaml:"publisher"`
+}
+
+type QueuesConfig struct {
+	TransactionLog string                          `yaml:"transaction_log" default:"transaction_log"`
+	Mobilink       queue_config.ConsumeQueueConfig `yaml:"mobilink"`
+	Yondu          YonduQueueConfig                `yaml:"yondu"`
+}
+type YonduQueueConfig struct {
+	Enabled         bool                            `yaml:"enabled" default:"false"`
+	NewSubscription queue_config.ConsumeQueueConfig `yaml:"new"`
+	SentConsent     string                          `yaml:"sent_consent"`
+	MT              string                          `yaml:"mt"`
 }
 
 func LoadConfig() AppConfig {
@@ -41,11 +54,17 @@ func LoadConfig() AppConfig {
 		}
 	}
 
-	if appConfig.Name == "" {
+	if appConfig.AppName == "" {
 		log.Fatal("app name must be defiled as <host>_<name>")
 	}
-	if strings.Contains(appConfig.Name, "-") {
+	if strings.Contains(appConfig.AppName, "-") {
 		log.Fatal("app name must be without '-' : it's not a valid metric name")
+	}
+	if appConfig.MetricInstancePrefix == "" {
+		log.Fatal("metric_instance_prefix be defiled as <host>_<name>")
+	}
+	if strings.Contains(appConfig.MetricInstancePrefix, "-") {
+		log.Fatal("metric_instance_prefix be without '-' : it's not a valid metric name")
 	}
 
 	appConfig.Server.Port = envString("PORT", appConfig.Server.Port)

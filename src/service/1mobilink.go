@@ -2,7 +2,6 @@ package service
 
 import (
 	"encoding/json"
-	"fmt"
 	"time"
 
 	log "github.com/Sirupsen/logrus"
@@ -23,7 +22,7 @@ func processNewMobilinkSubscription(deliveries <-chan amqp.Delivery) {
 
 		log.WithField("body", string(msg.Body)).Debug("start process")
 		if err := json.Unmarshal(msg.Body, &ns); err != nil {
-			Dropped.Inc()
+			Mobilink.Dropped.Inc()
 
 			log.WithFields(log.Fields{
 				"error": err.Error(),
@@ -36,8 +35,8 @@ func processNewMobilinkSubscription(deliveries <-chan amqp.Delivery) {
 		r = ns.EventData
 
 		if r.Msisdn == "" || r.CampaignId == 0 {
-			Dropped.Inc()
-			Empty.Inc()
+			Mobilink.Dropped.Inc()
+			Mobilink.Empty.Inc()
 
 			log.WithFields(log.Fields{
 				"error":        "Empty message",
@@ -46,21 +45,15 @@ func processNewMobilinkSubscription(deliveries <-chan amqp.Delivery) {
 			}).Error("consume new subscritpion")
 			goto ack
 		}
-		if err := addNewSubscriptionToDB(r); err != nil {
-		nack:
-			if err := msg.Nack(false, true); err != nil {
-				log.WithFields(log.Fields{
-					"tid":   r.Tid,
-					"error": err.Error(),
-				}).Error("cannot nack")
-				time.Sleep(time.Second)
-				goto nack
-			}
+		if err := rec.AddNewSubscriptionToDB(&r); err != nil {
+			Mobilink.AddToDBErrors.Inc()
+			msg.Nack(false, true)
 			continue
+		} else {
+			Mobilink.AddToDbSuccess.Inc()
 		}
 
 		if err := svc.sendTarifficate(r); err != nil {
-			NotifyErrors.Inc()
 			log.WithFields(log.Fields{
 				"tid":   r.Tid,
 				"error": err.Error(),
