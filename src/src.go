@@ -21,7 +21,7 @@ func RunServer() {
 		appConfig.Server,
 		appConfig.InMemClientConfig,
 		appConfig.DbConf,
-		appConfig.ConsumeQueues,
+		appConfig.Service,
 		appConfig.Consumer,
 		appConfig.Notifier,
 	)

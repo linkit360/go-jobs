@@ -12,10 +12,16 @@ inmem_client:
 queues:
   mobilink:
     enabled: true
-    name: mobilink_new_subscriptions
-    prefetch_count: 10
-    threads_count: 10
+    new:
+      name: mobilink_new_subscriptions
+      prefetch_count: 10
+      threads_count: 10
   yondu:
+    enabled: true
+    periodic:
+      enabled: true
+      fetch_limit: 500
+      operator_code: 51500
     new:
       name: yondu_new_subscription
       prefetch_count: 10

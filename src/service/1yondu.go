@@ -22,6 +22,8 @@ type EventNotifyMO struct {
 func processNewYonduSubscription(deliveries <-chan amqp.Delivery) {
 	for msg := range deliveries {
 		var r rec.Record
+		var periodic rec.PeriodicSubscription
+
 		var err error
 		var logCtx *log.Entry
 		var blackListed bool
@@ -41,11 +43,11 @@ func processNewYonduSubscription(deliveries <-chan amqp.Delivery) {
 				"error": err.Error(),
 				"msg":   "dropped",
 				"mo":    string(msg.Body),
-			}).Error("consume from " + svc.conf.queues.Yondu.NewSubscription.Name)
+			}).Error("consume from " + svc.conf.internal.Yondu.NewSubscription.Name)
 			goto ack
 		}
 
-		r, err = getRecordByMO(e.EventData)
+		periodic, r, err = getRecordByMO(e.EventData)
 		if err != nil {
 			msg.Nack(false, true)
 			continue
@@ -81,8 +83,9 @@ func processNewYonduSubscription(deliveries <-chan amqp.Delivery) {
 		} else {
 			logCtx.Debug("no previous subscription found")
 		}
+
 		// here get subscription id
-		if err := rec.AddNewSubscriptionToDB(&r); err != nil {
+		if err := rec.AddPeriodicSubscriptionToDB(&periodic); err != nil {
 			Yondu.AddToDBErrors.Inc()
 			msg.Nack(false, true)
 			continue
@@ -135,8 +138,9 @@ func processNewYonduSubscription(deliveries <-chan amqp.Delivery) {
 	}
 }
 
-func getRecordByMO(req yondu_service.MOParameters) (rec.Record, error) {
+func getRecordByMO(req yondu_service.MOParameters) (rec.PeriodicSubscription, rec.Record, error) {
 	r := rec.Record{}
+	periodic := rec.PeriodicSubscription{}
 	campaign, err := inmem_client.GetCampaignByKeyWord(req.KeyWord)
 	if err != nil {
 		Yondu.MOCallUnknownCampaign.Inc()
@@ -146,7 +150,7 @@ func getRecordByMO(req yondu_service.MOParameters) (rec.Record, error) {
 			"keyword": req.KeyWord,
 			"error":   err.Error(),
 		}).Error("cannot get campaign by keyword")
-		return r, err
+		return periodic, r, err
 	}
 	svc, err := inmem_client.GetServiceById(campaign.ServiceId)
 	if err != nil {
@@ -159,7 +163,7 @@ func getRecordByMO(req yondu_service.MOParameters) (rec.Record, error) {
 			"campaignId": campaign.Id,
 			"error":      err.Error(),
 		}).Error("cannot get service by id")
-		return r, err
+		return periodic, r, err
 	}
 	publisher := ""
 	pixelSetting, err := inmem_client.GetPixelSettingByCampaignId(campaign.Id)
@@ -190,7 +194,6 @@ func getRecordByMO(req yondu_service.MOParameters) (rec.Record, error) {
 		}).Error("cannot parse operators time")
 		sentAt = time.Now().UTC()
 	}
-
 	r = rec.Record{
 		SentAt:             sentAt,
 		Msisdn:             req.Msisdn,
@@ -208,5 +211,79 @@ func getRecordByMO(req yondu_service.MOParameters) (rec.Record, error) {
 		Price:              100 * int(svc.Price),
 		OperatorToken:      req.TransID,
 	}
-	return r, nil
+	periodic = rec.PeriodicSubscription{
+		SentAt:                      r.SentAt,
+		Status:                      r.SubscriptionStatus,
+		Tid:                         r.Tid,
+		Price:                       r.Price,
+		ServiceId:                   r.ServiceId,
+		CampaignId:                  r.CampaignId,
+		CountryCode:                 r.CountryCode,
+		OperatorCode:                r.OperatorCode,
+		Msisdn:                      r.Msisdn,
+		SendContentDay:              svc.SendContentDay,
+		SendContentAllowedFromHours: svc.SendContentAllowedTime.From,
+		SendContentAllowedToHours:   svc.SendContentAllowedTime.To,
+	}
+	return periodic, r, nil
+}
+
+// get periodic for this day and time
+// generate subscriptions tid
+// tid := rec.GenerateTID()
+// create new subscriptions
+// generate send_content_text
+// send sms via Yondu API
+// create periodic transactions
+// update periodic last_request_at
+func processPeriodic() {
+
+	begin := time.Now()
+	periodics, err := rec.GetPeriodics(
+		svc.conf.internal.Yondu.Periodic.OperatorCode,
+		svc.conf.internal.Yondu.Periodic.FetchLimit,
+	)
+	if err != nil {
+		err = fmt.Errorf("rec.GetPeriodics: %s", err.Error())
+		log.WithFields(log.Fields{
+			"error": err.Error(),
+		}).Error("cannot get periodics")
+		return
+	}
+	Yondu.GetPeriodicsDuration.Observe(time.Since(begin).Seconds())
+
+	for _, p := range periodics {
+		sentAt := time.Now().UTC()
+
+		r := rec.Record{
+			SentAt:             sentAt,
+			Msisdn:             p.Msisdn,
+			Tid:                rec.GenerateTID(),
+			SubscriptionStatus: "",
+			CountryCode:        p.CountryCode,
+			OperatorCode:       p.OperatorCode,
+			Publisher:          "",
+			Pixel:              "",
+			CampaignId:         p.CampaignId,
+			ServiceId:          p.ServiceId,
+			DelayHours:         p.DelayHours,
+			KeepDays:           p.KeepDays,
+			Price:              p.Price,
+			OperatorToken:      p.OperatorToken,
+		}
+
+		if err := rec.AddNewSubscriptionToDB(&r); err != nil {
+			err = fmt.Errorf("rec.AddNewSubscriptionToDB: %s", err.Error())
+			log.WithFields(log.Fields{
+				"error": err.Error(),
+			}).Error("cannot add new subscription")
+			return
+		}
+		// get content via content service
+		// generate send_content_text
+		// send sms via Yondu API
+		// create periodic transactions
+		// update periodic last_request_at
+	}
+
 }

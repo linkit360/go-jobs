@@ -31,7 +31,7 @@ type Config struct {
 	server    config.ServerConfig
 	db        db.DataBaseConfig
 	operators map[string]struct{}
-	queues    config.QueuesConfig
+	internal  config.ServiceConfig
 	consumer  amqp.ConsumerConfig
 	publisher amqp.NotifierConfig
 }
@@ -51,7 +51,7 @@ func InitService(
 	serverConfig config.ServerConfig,
 	inMemConfig inmem_client.RPCClientConfig,
 	dbConf db.DataBaseConfig,
-	queuesConfig config.QueuesConfig,
+	queuesConfig config.ServiceConfig,
 	consumerConfig amqp.ConsumerConfig,
 	notifierConfig amqp.NotifierConfig,
 ) {
@@ -59,7 +59,7 @@ func InitService(
 	svc.conf = Config{
 		server:    serverConfig,
 		db:        dbConf,
-		queues:    queuesConfig,
+		internal:  queuesConfig,
 		consumer:  consumerConfig,
 		publisher: notifierConfig,
 	}
@@ -78,8 +78,8 @@ func InitService(
 	if queuesConfig.Mobilink.Enabled {
 		svc.consumer.Mobilink = amqp.NewConsumer(
 			consumerConfig,
-			queuesConfig.Mobilink.Name,
-			queuesConfig.Mobilink.PrefetchCount,
+			queuesConfig.Mobilink.NewSubscription.Name,
+			queuesConfig.Mobilink.NewSubscription.PrefetchCount,
 		)
 
 		if err := svc.consumer.Mobilink.Connect(); err != nil {
@@ -91,8 +91,8 @@ func InitService(
 			svc.channels.Mobilink,
 			processNewMobilinkSubscription,
 			serverConfig.ThreadsCount,
-			queuesConfig.Mobilink.Name,
-			queuesConfig.Mobilink.Name,
+			queuesConfig.Mobilink.NewSubscription.Name,
+			queuesConfig.Mobilink.NewSubscription.Name,
 		)
 	}
 
@@ -116,6 +116,15 @@ func InitService(
 			queuesConfig.Yondu.NewSubscription.Name,
 		)
 	}
+
+	go func() {
+		for {
+			time.Sleep(time.Second)
+			if queuesConfig.Yondu.Periodic {
+				processPeriodic()
+			}
+		}
+	}()
 
 }
 

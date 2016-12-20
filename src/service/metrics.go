@@ -3,6 +3,7 @@ package service
 import (
 	"time"
 
+	"github.com/go-kit/kit/metrics/prometheus"
 	m "github.com/vostrok/utils/metrics"
 )
 
@@ -21,7 +22,7 @@ func initMetrics(name string) {
 	OperatorNotApplicable = m.NewGauge("", "", "operator_not_applicable", "there is no such operator in database")
 	NotifyErrors = m.NewGauge("", "", "notify_errors", "sent to mt manager queue error")
 
-	if svc.conf.queues.Yondu.Enabled {
+	if svc.conf.internal.Yondu.Enabled {
 		Yondu = initYonduMetrics()
 		go func() {
 			for range time.Tick(time.Minute) {
@@ -37,7 +38,7 @@ func initMetrics(name string) {
 			}
 		}()
 	}
-	if svc.conf.queues.Mobilink.Enabled {
+	if svc.conf.internal.Mobilink.Enabled {
 		Mobilink = initMobilinkmetrics()
 		go func() {
 			for range time.Tick(time.Minute) {
@@ -68,6 +69,7 @@ type YonduMetrics struct {
 	MOCallParseTimeError   m.Gauge
 	AddToDBErrors          m.Gauge
 	AddToDbSuccess         m.Gauge
+	GetPeriodicsDuration   prometheus.Summary
 }
 
 func initYonduMetrics() *YonduMetrics {
@@ -82,6 +84,7 @@ func initYonduMetrics() *YonduMetrics {
 		MOCallParseTimeError:   m.NewGauge(appName, telcoName, "mo_call_parse_time_error", "yondu MO parse operators time error"),
 		AddToDBErrors:          m.NewGauge(appName, telcoName, "add_to_db_errors", "subscription add to db errors"),
 		AddToDbSuccess:         m.NewGauge(appName, telcoName, "add_to_db_success", "subscription add to db success"),
+		GetPeriodicsDuration:   m.NewSummary("get_periodics_duration_seconds", "get_periodics_duration_seconds"),
 	}
 }
 

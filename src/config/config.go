@@ -26,21 +26,34 @@ type AppConfig struct {
 	Server               ServerConfig                 `yaml:"server"`
 	InMemClientConfig    inmem_client.RPCClientConfig `yaml:"inmem_client"`
 	DbConf               db.DataBaseConfig            `yaml:"db"`
-	ConsumeQueues        QueuesConfig                 `yaml:"queues"`
+	Service              ServiceConfig                `yaml:"queues"`
 	Consumer             amqp.ConsumerConfig          `yaml:"consumer"`
 	Notifier             amqp.NotifierConfig          `yaml:"publisher"`
 }
 
-type QueuesConfig struct {
-	TransactionLog string                          `yaml:"transaction_log" default:"transaction_log"`
-	Mobilink       queue_config.ConsumeQueueConfig `yaml:"mobilink"`
-	Yondu          YonduQueueConfig                `yaml:"yondu"`
+type ServiceConfig struct {
+	TransactionLog string              `yaml:"transaction_log" default:"transaction_log"`
+	Mobilink       MobilinkQueueConfig `yaml:"mobilink"`
+	Yondu          YonduQueueConfig    `yaml:"yondu"`
 }
 type YonduQueueConfig struct {
 	Enabled         bool                            `yaml:"enabled" default:"false"`
+	Periodic        PeriodicConfig                  `yaml:"periodic" `
 	NewSubscription queue_config.ConsumeQueueConfig `yaml:"new"`
 	SentConsent     string                          `yaml:"sent_consent"`
 	MT              string                          `yaml:"mt"`
+}
+
+type MobilinkQueueConfig struct {
+	Enabled         bool                            `yaml:"enabled" default:"false"`
+	Periodic        bool                            `yaml:"periodic" default:"false"`
+	NewSubscription queue_config.ConsumeQueueConfig `yaml:"new"`
+}
+
+type PeriodicConfig struct {
+	Enabled      bool `yaml:"periodic" default:"false"`
+	FetchLimit   int  `yaml:"fetch_limit" default:"500"`
+	OperatorCode int  `yaml:"operator_code" default:"51500"`
 }
 
 func LoadConfig() AppConfig {

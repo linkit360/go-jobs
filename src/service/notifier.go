@@ -72,7 +72,7 @@ func (svc *Service) publishTransactionLog(eventName string,
 
 		return fmt.Errorf("json.Marshal: %s", err.Error())
 	}
-	svc.publisher.Publish(amqp.AMQPMessage{svc.conf.queues.TransactionLog, 0, body})
+	svc.publisher.Publish(amqp.AMQPMessage{svc.conf.internal.TransactionLog, 0, body})
 	return nil
 }
 
@@ -88,7 +88,7 @@ func (svc *Service) publishYonduSentConsent(r rec.Record) error {
 
 		return fmt.Errorf("json.Marshal: %s", err.Error())
 	}
-	svc.publisher.Publish(amqp.AMQPMessage{svc.conf.queues.Yondu.SentConsent, 0, body})
+	svc.publisher.Publish(amqp.AMQPMessage{svc.conf.internal.Yondu.SentConsent, 0, body})
 	return nil
 }
 func (svc *Service) publishYonduMT(r rec.Record) error {
@@ -103,6 +103,6 @@ func (svc *Service) publishYonduMT(r rec.Record) error {
 
 		return fmt.Errorf("json.Marshal: %s", err.Error())
 	}
-	svc.publisher.Publish(amqp.AMQPMessage{svc.conf.queues.Yondu.MT, 0, body})
+	svc.publisher.Publish(amqp.AMQPMessage{svc.conf.internal.Yondu.MT, 0, body})
 	return nil
 }
