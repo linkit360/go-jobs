@@ -36,24 +36,21 @@ type ServiceConfig struct {
 	Mobilink       MobilinkQueueConfig `yaml:"mobilink"`
 	Yondu          YonduQueueConfig    `yaml:"yondu"`
 }
+
 type YonduQueueConfig struct {
-	Enabled         bool                            `yaml:"enabled" default:"false"`
-	Periodic        PeriodicConfig                  `yaml:"periodic" `
+	Enabled bool `yaml:"enabled" default:"false"`
+	//Periodic        PeriodicConfig                  `yaml:"periodic" `
 	NewSubscription queue_config.ConsumeQueueConfig `yaml:"new"`
 	SentConsent     string                          `yaml:"sent_consent"`
 	MT              string                          `yaml:"mt"`
+	Charge          string                          `yaml:"charge"`
+	CallBack        queue_config.ConsumeQueueConfig `yaml:"callBack"`
 }
 
 type MobilinkQueueConfig struct {
 	Enabled         bool                            `yaml:"enabled" default:"false"`
 	Periodic        bool                            `yaml:"periodic" default:"false"`
 	NewSubscription queue_config.ConsumeQueueConfig `yaml:"new"`
-}
-
-type PeriodicConfig struct {
-	Enabled      bool `yaml:"periodic" default:"false"`
-	FetchLimit   int  `yaml:"fetch_limit" default:"500"`
-	OperatorCode int  `yaml:"operator_code" default:"51500"`
 }
 
 func LoadConfig() AppConfig {

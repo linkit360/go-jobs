@@ -65,99 +65,10 @@ func InitService(
 	}
 	initMetrics(appName)
 	rec.Init(dbConf)
-	initCache()
 
 	if err := inmem_client.Init(inMemConfig); err != nil {
 		log.Fatal("cann't init inmemory service")
 	}
 
 	svc.publisher = amqp.NewNotifier(notifierConfig)
-
-	svc.consumer = Consumers{}
-
-	if queuesConfig.Mobilink.Enabled {
-		svc.consumer.Mobilink = amqp.NewConsumer(
-			consumerConfig,
-			queuesConfig.Mobilink.NewSubscription.Name,
-			queuesConfig.Mobilink.NewSubscription.PrefetchCount,
-		)
-
-		if err := svc.consumer.Mobilink.Connect(); err != nil {
-			log.Fatal("rbmq consumer connect:", err.Error())
-		}
-
-		amqp.InitQueue(
-			svc.consumer.Mobilink,
-			svc.channels.Mobilink,
-			processNewMobilinkSubscription,
-			serverConfig.ThreadsCount,
-			queuesConfig.Mobilink.NewSubscription.Name,
-			queuesConfig.Mobilink.NewSubscription.Name,
-		)
-	}
-
-	if queuesConfig.Yondu.NewSubscription.Enabled {
-		svc.consumer.Yondu = amqp.NewConsumer(
-			consumerConfig,
-			queuesConfig.Yondu.NewSubscription.Name,
-			queuesConfig.Yondu.NewSubscription.PrefetchCount,
-		)
-
-		if err := svc.consumer.Yondu.Connect(); err != nil {
-			log.Fatal("rbmq consumer connect:", err.Error())
-		}
-
-		amqp.InitQueue(
-			svc.consumer.Yondu,
-			svc.channels.Yondu,
-			processNewYonduSubscription,
-			serverConfig.ThreadsCount,
-			queuesConfig.Yondu.NewSubscription.Name,
-			queuesConfig.Yondu.NewSubscription.Name,
-		)
-	}
-
-	go func() {
-		for {
-			time.Sleep(time.Second)
-			if queuesConfig.Yondu.Periodic {
-				processPeriodic()
-			}
-		}
-	}()
-
-}
-
-func initCache() {
-	prev, err := rec.LoadPreviousSubscriptions()
-	if err != nil {
-		log.WithField("error", err.Error()).Fatal("cannot load previous subscriptions")
-	}
-	log.WithField("count", len(prev)).Debug("loaded previous subscriptions")
-	svc.prevCache = cache.New(24*time.Hour, time.Minute)
-	for _, v := range prev {
-		key := v.Msisdn + strconv.FormatInt(v.ServiceId, 10)
-		svc.prevCache.Set(key, struct{}{}, time.Now().Sub(v.CreatedAt))
-	}
-}
-func getPrevSubscriptionCache(msisdn string, serviceId int64, tid string) bool {
-	key := msisdn + strconv.FormatInt(serviceId, 10)
-	_, found := svc.prevCache.Get(key)
-	log.WithFields(log.Fields{
-		"tid":   tid,
-		"key":   key,
-		"found": found,
-	}).Debug("get previous subscription cache")
-	return found
-}
-func setPrevSubscriptionCache(msisdn string, serviceId int64, tid string) {
-	key := msisdn + strconv.FormatInt(serviceId, 10)
-	_, found := svc.prevCache.Get(key)
-	if !found {
-		svc.prevCache.Set(key, struct{}{}, 24*time.Hour)
-		log.WithFields(log.Fields{
-			"tid": tid,
-			"key": key,
-		}).Debug("set previous subscription cache")
-	}
 }
