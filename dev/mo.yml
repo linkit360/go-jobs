@@ -9,37 +9,9 @@ server:
 inmem_client:
   timeout: 10
 
-queues:
-  mobilink:
-    enabled: true
-    new:
-      name: mobilink_new_subscriptions
-      prefetch_count: 10
-      threads_count: 10
-  yondu:
-    enabled: true
-    periodic:
-      enabled: true
-      fetch_limit: 500
-      operator_code: 51500
-    new:
-      name: yondu_new_subscription
-      prefetch_count: 10
-      threads_count: 10
-    sent_consent: yondu_send_consent
-    mt: yondu_mt
-
-consumer:
-  reconnect_delay: 10
-  conn:
-    user: linkit
-    pass: dg-U_oHhy7-
-    host: localhost
-    port: 5672
-
 publisher:
   pending_buffer_path: /home/centos/linkit/mo_pending.json
-  chan_capacity: 100000
+  chan_capacity: 100
   conn:
     user: linkit
     pass: dg-U_oHhy7-
