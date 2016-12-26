@@ -14,9 +14,7 @@ import (
 )
 
 type ServerConfig struct {
-	Port         string `default:"50304"`
-	OperatorName string `yaml:"operator_name"`
-	ThreadsCount int    `default:"1" yaml:"threads_count"`
+	Port string `default:"50304"`
 }
 
 type AppConfig struct {
