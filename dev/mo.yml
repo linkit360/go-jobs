@@ -3,8 +3,6 @@ app_name: mo
 
 server:
   port: 50303
-  threads_count: 1
-  queue_prefetch_count: 4
 
 inmem_client:
   timeout: 10
