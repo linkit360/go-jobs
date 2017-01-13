@@ -18,12 +18,11 @@ type ServerConfig struct {
 }
 
 type AppConfig struct {
-	MetricInstancePrefix string                       `yaml:"metric_instance_prefix"`
-	AppName              string                       `yaml:"app_name"`
-	Server               ServerConfig                 `yaml:"server"`
-	InMemClientConfig    inmem_client.RPCClientConfig `yaml:"inmem_client"`
-	DbConf               db.DataBaseConfig            `yaml:"db"`
-	Notifier             amqp.NotifierConfig          `yaml:"publisher"`
+	AppName           string                       `yaml:"app_name"`
+	Server            ServerConfig                 `yaml:"server"`
+	InMemClientConfig inmem_client.RPCClientConfig `yaml:"inmem_client"`
+	DbConf            db.DataBaseConfig            `yaml:"db"`
+	Notifier          amqp.NotifierConfig          `yaml:"publisher"`
 }
 
 func LoadConfig() AppConfig {
@@ -43,13 +42,6 @@ func LoadConfig() AppConfig {
 	if strings.Contains(appConfig.AppName, "-") {
 		log.Fatal("app name must be without '-' : it's not a valid metric name")
 	}
-	if appConfig.MetricInstancePrefix == "" {
-		log.Fatal("metric_instance_prefix be defiled as <host>_<name>")
-	}
-	if strings.Contains(appConfig.MetricInstancePrefix, "-") {
-		log.Fatal("metric_instance_prefix be without '-' : it's not a valid metric name")
-	}
-
 	appConfig.Server.Port = envString("PORT", appConfig.Server.Port)
 	appConfig.Notifier.Conn.Host = envString("RBMQ_HOST", appConfig.Notifier.Conn.Host)
 
