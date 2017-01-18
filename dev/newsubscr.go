@@ -22,7 +22,7 @@ type conf struct {
 var notifierService rbmq.Notifier
 
 func main() {
-	cfg := flag.String("config", "mo.yml", "configuration yml file")
+	cfg := flag.String("config", "jobs.yml", "configuration yml file")
 	filePath := flag.String("file", "log", "log file yml file")
 	flag.Parse()
 

@@ -1,4 +1,4 @@
-app_name: mo
+app_name: jobs
 
 server:
   port: 50303
@@ -7,7 +7,7 @@ inmem_client:
   timeout: 10
 
 publisher:
-  pending_buffer_path: /home/centos/linkit/mo_pending.json
+  pending_buffer_path: /home/centos/linkit/jobs_pending.json
   chan_capacity: 100
   conn:
     user: linkit

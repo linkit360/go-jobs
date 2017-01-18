@@ -10,16 +10,12 @@ import (
 	log "github.com/Sirupsen/logrus"
 	"github.com/gin-gonic/gin"
 
+	"database/sql"
 	"github.com/vostrok/utils/amqp"
 	rec "github.com/vostrok/utils/rec"
 )
 
-// does simple thing:
-// selects all subscriptions form database with result = '' and before hours
-// and pushes to queue
-func AddSubscriptionsHandler(r *gin.Engine) {
-	rg := r.Group("/api")
-	rg.GET("", api)
+type suspendedSubscriptions struct {
 }
 
 type Params struct {
@@ -27,7 +23,15 @@ type Params struct {
 	Hours int
 }
 
-func api(c *gin.Context) {
+// does simple thing:
+// selects all subscriptions form database with result = '' and before hours
+// and pushes to queue
+func AddSubscriptionsHandler(r *gin.Engine) {
+	rg := r.Group("/api")
+	rg.GET("", svc.suspendedSubscriptions.Call)
+}
+
+func (ss *suspendedSubscriptions) Call(c *gin.Context) {
 	limitStr, _ := c.GetQuery("limit")
 	limit, err := strconv.Atoi(limitStr)
 	if err != nil || limitStr == "" {
@@ -47,7 +51,7 @@ func api(c *gin.Context) {
 		Hours: hours,
 	}
 
-	count, err := processOldNotPaidSubscriptions(params)
+	count, err := ss.process(params)
 	if err != nil {
 		c.JSON(500, err.Error())
 		return
@@ -55,7 +59,7 @@ func api(c *gin.Context) {
 	c.JSON(200, count)
 }
 
-func processOldNotPaidSubscriptions(p Params) (count int, err error) {
+func (ss *suspendedSubscriptions) process(p Params) (count int, err error) {
 	begin := time.Now()
 	defer func() {
 		log.WithFields(log.Fields{
@@ -65,7 +69,7 @@ func processOldNotPaidSubscriptions(p Params) (count int, err error) {
 		}).Debug("get notpaid subscriptions")
 	}()
 
-	records, err := rec.GetSuspendedSubscriptions(41001, p.Hours, p.Limit)
+	records, err := ss.Get(41001, p.Hours, p.Limit)
 	if err != nil {
 		err = fmt.Errorf("rec.GetSuspendedSubscriptions: %s", err.Error())
 		return
@@ -76,7 +80,7 @@ func processOldNotPaidSubscriptions(p Params) (count int, err error) {
 	for _, r := range records {
 		wg.Add(1)
 		go func() {
-			if err = svc.sendTarifficate(r); err != nil {
+			if err = ss.sendTarifficate(r); err != nil {
 				NotifyErrors.Inc()
 
 				log.WithFields(log.Fields{
@@ -93,7 +97,73 @@ func processOldNotPaidSubscriptions(p Params) (count int, err error) {
 	return
 }
 
-func (svc *Service) sendTarifficate(r rec.Record) error {
+func (ss *suspendedSubscriptions) Get(operatorCode int64, hours, limit int) (records []rec.Record, err error) {
+	query := fmt.Sprintf("SELECT "+
+		"id, "+
+		"tid, "+
+		"msisdn, "+
+		"pixel, "+
+		"publisher, "+
+		"id_service, "+
+		"id_campaign, "+
+		"operator_code, "+
+		"country_code, "+
+		"attempts_count, "+
+		"delay_hours, "+
+		"paid_hours, "+
+		"keep_days, "+
+		"price "+
+		" FROM %ssubscriptions "+
+		" WHERE result = '' AND "+
+		"operator_code = $1 AND "+
+		" (CURRENT_TIMESTAMP - %d * INTERVAL '1 hour' ) > created_at "+
+		" ORDER BY id ASC LIMIT %s",
+		svc.conf.db.TablePrefix,
+		hours,
+		strconv.Itoa(limit),
+	)
+	var rows *sql.Rows
+	rows, err = svc.dbConn.Query(query, operatorCode)
+	if err != nil {
+		DBErrors.Inc()
+		err = fmt.Errorf("db.Query: %s, query: %s", err.Error(), query)
+		return
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		record := rec.Record{}
+
+		if err = rows.Scan(
+			&record.SubscriptionId,
+			&record.Tid,
+			&record.Msisdn,
+			&record.Pixel,
+			&record.Publisher,
+			&record.ServiceId,
+			&record.CampaignId,
+			&record.OperatorCode,
+			&record.CountryCode,
+			&record.AttemptsCount,
+			&record.DelayHours,
+			&record.PaidHours,
+			&record.KeepDays,
+			&record.Price,
+		); err != nil {
+			DBErrors.Inc()
+			err = fmt.Errorf("rows.Scan: %s", err.Error())
+			return
+		}
+		records = append(records, record)
+	}
+	if rows.Err() != nil {
+		DBErrors.Inc()
+		err = fmt.Errorf("rows.Err: %s", err.Error())
+		return
+	}
+	return
+}
+func (ss *suspendedSubscriptions) sendTarifficate(r rec.Record) error {
 	queue := "mobilink_mo_tarifficate"
 	event := amqp.EventNotify{
 		EventName: "charge",

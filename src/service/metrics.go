@@ -13,17 +13,17 @@ import (
 
 var (
 	Errors                    m.Gauge
-	OperatorNotApplicable     m.Gauge
 	NotifyErrors              m.Gauge
+	DBErrors                  m.Gauge
 	PendingSubscriptionsCount prometheus.Gauge
 	PendingRetriesCount       prometheus.Gauge
 	RetriesPeriod             prometheus.Gauge
 )
 
 func initMetrics(name string) {
-	OperatorNotApplicable = m.NewGauge("", "", "operator_not_applicable", "there is no such operator in database")
 	NotifyErrors = m.NewGauge("", "", "notify_errors", "sent to mt manager queue error")
 	Errors = m.NewGauge("", "", "errors", "errors")
+	DBErrors = m.NewGauge("", "", "db_errors", "db_errors")
 	PendingSubscriptionsCount = m.PrometheusGauge("pending", "subscriptions", "count", "pending subscriptions count")
 	PendingRetriesCount = m.PrometheusGauge("pending", "retries", "count", "pending retries count")
 	RetriesPeriod = m.PrometheusGauge("retries", "period", "seconds", "retries period seconds")
@@ -31,7 +31,7 @@ func initMetrics(name string) {
 	go func() {
 		for range time.Tick(time.Minute) {
 			Errors.Update()
-			OperatorNotApplicable.Update()
+			DBErrors.Update()
 			NotifyErrors.Update()
 		}
 	}()
