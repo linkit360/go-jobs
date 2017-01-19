@@ -1,6 +1,5 @@
 package src
 
-// Former corner for operator service
 import (
 	"runtime"
 
@@ -31,6 +30,7 @@ func RunServer() {
 	r := gin.New()
 	m.AddHandler(r)
 	service.AddSubscriptionsHandler(r)
+	service.AddJobHandlers(r)
 	r.Run(":" + appConfig.Server.Port)
 
 	log.WithField("port", appConfig.Server.Port).Info("init")

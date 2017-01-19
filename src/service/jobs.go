@@ -33,10 +33,11 @@ type Job struct {
 	FileName      string         `json:"file_name,omitempty"`
 	Params        string         `json:"params,omitempty"`
 	Skip          int64          `json:"skip,omitempty"`
-	StopRequested bool           `json:"stopping,omitempty"`
+	StopRequested bool           `json:"-"`
 	ParsedParams  Params         `json:"parsed_params,omitempty"`
 	fh            *os.File       `json:"-"`
 	scanner       *bufio.Scanner `json:"-"`
+	finished      bool           `json:"finished"`
 }
 type Params struct {
 	DateFrom     string `json:"date_from,omitempty"`
@@ -57,9 +58,11 @@ func initJobs(jConf config.JobsConfig) *jobs {
 	if jConf.PlannedEnabled {
 		go jobs.planned()
 	}
+
+	go jobs.stopJobs()
 	return jobs
 }
-func (j *jobs) AddHandlers(r *gin.Engine) {
+func AddJobHandlers(r *gin.Engine) {
 	rg := r.Group("/jobs")
 	rg.Group("/start").GET("", svc.jobs.start)
 	rg.Group("/stop").GET("", svc.jobs.stop)
@@ -67,25 +70,25 @@ func (j *jobs) AddHandlers(r *gin.Engine) {
 	rg.Group("/status").GET("", svc.jobs.status)
 }
 func (j *jobs) planned() {
-	//for range time.Tick(time.Second) {
-	//	jobs, err := j.getList("ready")
-	//	if err != nil {
-	//		log.WithFields(log.Fields{
-	//			"error": err.Error(),
-	//		}).Error("cannt process")
-	//		return
-	//	}
-	//
-	//	for _, job := range jobs {
-	//		if time.Now().Sub(job.RunAt) > 10 && job.Status == "ready" {
-	//			if err = svc.jobs.startJob(job.Id); err != nil {
-	//				log.WithFields(log.Fields{
-	//					"error": err.Error(),
-	//				}).Error("cannt process")
-	//			}
-	//		}
-	//	}
-	//}
+	for range time.Tick(time.Second) {
+		jobs, err := j.getList("ready")
+		if err != nil {
+			log.WithFields(log.Fields{
+				"error": err.Error(),
+			}).Error("cannt process")
+			return
+		}
+
+		for _, job := range jobs {
+			if time.Now().Sub(job.RunAt) > 10 && job.Status == "ready" {
+				if err = svc.jobs.startJob(job.Id); err != nil {
+					log.WithFields(log.Fields{
+						"error": err.Error(),
+					}).Error("cannt process")
+				}
+			}
+		}
+	}
 }
 func (j *jobs) start(c *gin.Context) { // start?id=132123
 	idStr, ok := c.GetQuery("id")
@@ -148,6 +151,9 @@ func (j *jobs) status(c *gin.Context) {
 	c.JSON(http.StatusOK, jobs)
 }
 func (j *jobs) startJob(id int64) error {
+	log.WithFields(log.Fields{
+		"id": id,
+	}).Info("start")
 	job, err := j.get(id)
 	if err != nil {
 		return err
@@ -173,12 +179,12 @@ func (j *jobs) startJob(id int64) error {
 	svc.jobs.running[id].run()
 	return nil
 }
+
 func (j *Job) run() {
 	log.WithFields(log.Fields{
-		"id": j.Id,
+		"id":  j.Id,
+		"job": fmt.Sprintf("%#v", j),
 	}).Info("run")
-
-	defer svc.jobs.stopJob(j.Id)
 
 	go func() {
 		for {
@@ -189,11 +195,16 @@ func (j *Job) run() {
 					log.WithFields(log.Fields{
 						"error": err.Error(),
 					}).Error("cannt process")
+					j.finished = true
 					return
 				}
 				for idx, r := range expired {
 					if j.StopRequested || svc.exiting {
-						log.WithFields(log.Fields{}).Info("exiting")
+						log.WithFields(log.Fields{
+							"jobStop": j.StopRequested,
+							"service": svc.exiting,
+						}).Info("exiting")
+						j.finished = true
 						return
 					}
 					if r.RetryId < j.Skip {
@@ -211,15 +222,20 @@ func (j *Job) run() {
 						continue
 					}
 				}
-
+				j.finished = true
 			}
+
 			if j.Type == "injection" {
 				defer j.closeJob()
 
 				var i int64
 				for {
 					if j.StopRequested || svc.exiting {
-						log.WithFields(log.Fields{}).Info("exiting")
+						log.WithFields(log.Fields{
+							"jobStop": j.StopRequested,
+							"service": svc.exiting,
+						}).Info("exiting")
+						j.finished = true
 						return
 					}
 					msisdn, err := j.nextMsisdn()
@@ -227,11 +243,17 @@ func (j *Job) run() {
 						log.WithFields(log.Fields{
 							"error": err.Error(),
 						}).Error("next msisdn")
+						j.finished = true
 						return
 					}
 					if i < j.Skip {
 						i++
 						continue
+					}
+					if msisdn == "" && err == nil {
+						log.WithFields(log.Fields{}).Info("done")
+						j.finished = true
+						return
 					}
 					if len(msisdn) < 5 {
 						log.WithFields(log.Fields{
@@ -300,6 +322,9 @@ func (j *Job) closeJob() error {
 	return j.fh.Close()
 }
 func (j *jobs) stopJob(id int64) error {
+	log.WithFields(log.Fields{
+		"id": id,
+	}).Info("stop")
 	_, ok := svc.jobs.running[id]
 	if !ok {
 		return fmt.Errorf("Not found: %d", id)
@@ -313,6 +338,18 @@ func (j *jobs) stopJob(id int64) error {
 	}
 	delete(svc.jobs.running, id)
 	return nil
+}
+func (j *jobs) stopJobs() {
+	for k, _ := range j.running {
+		if j.running[k].finished {
+			if err := j.stopJob(j.running[k].Id); err != nil {
+				log.WithFields(log.Fields{
+					"id":    k,
+					"error": err.Error(),
+				}).Error("stop")
+			}
+		}
+	}
 }
 func (j *jobs) getList(status string) (jobs []Job, err error) {
 	begin := time.Now()
