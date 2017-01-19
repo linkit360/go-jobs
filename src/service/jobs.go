@@ -21,9 +21,6 @@ type jobs struct {
 	running map[int64]*Job
 }
 
-// rename mo
-// exiting check for stop requested
-// run at shedulled job
 type Job struct {
 	Id            int64          `json:"id"`
 	UserId        int64          `json:"user_id"`
@@ -51,17 +48,39 @@ type Params struct {
 }
 
 func initJobs() *jobs {
-	return &jobs{
+	jobs := &jobs{
 		running: make(map[int64]*Job),
 	}
+
+	return jobs
 }
 func (j *jobs) AddHandlers(r *gin.Engine) {
 	rg := r.Group("/jobs")
 	rg.Group("/start").GET("", svc.jobs.start)
 	rg.Group("/stop").GET("", svc.jobs.stop)
-	//rg.Group("/resume").GET("", svc.jobs.resume)
+	rg.Group("/resume").GET("", svc.jobs.start)
 	rg.Group("/status").GET("", svc.jobs.status)
 }
+func (j *jobs) planned() {
+	jobs, err := j.getList("ready")
+	if err != nil {
+		log.WithFields(log.Fields{
+			"error": err.Error(),
+		}).Error("cannt process")
+		return
+	}
+
+	for _, job := range jobs {
+		if time.Now().Sub(job.RunAt) > 0 && job.Status == "ready" {
+			if err = svc.jobs.startJob(job.Id); err != nil {
+				log.WithFields(log.Fields{
+					"error": err.Error(),
+				}).Error("cannt process")
+			}
+		}
+	}
+}
+
 func (j *jobs) start(c *gin.Context) { // start?id=132123
 	idStr, ok := c.GetQuery("id")
 	if !ok {
@@ -113,7 +132,7 @@ func (j *jobs) stop(c *gin.Context) {
 	c.JSON(http.StatusOK, struct{}{})
 }
 func (j *jobs) status(c *gin.Context) {
-	jobs, err := j.getList("active")
+	jobs, err := j.getList("in progress")
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error": err.Error(),
@@ -131,24 +150,30 @@ func (j *jobs) startJob(id int64) error {
 	if err := json.Unmarshal([]byte(job.Params), &p); err != nil {
 		return fmt.Errorf("json.Unmarshal: %s, Params: %s", err.Error(), job.Params)
 	}
+	if err := svc.jobs.setStatus("in progress", id); err != nil {
+		return fmt.Errorf("jobs.setStatus: %s", err.Error())
+	}
 	svc.jobs.running[id] = &job
 	svc.jobs.running[id].run()
 	return nil
 }
 func (j *Job) run() error {
+
+	defer svc.jobs.stopJob(j.Id)
+
 	go func() {
 		for {
-			if j.StopRequested {
-				return nil
-			}
 			if j.Type == "expired" {
 				expired, err := svc.jobs.getExpiredList(j.Params)
 				if err != nil {
 					return fmt.Errorf("svc.jobs.getExpiredList: %s", err.Error())
 				}
 				for idx, r := range expired {
-					if j.StopRequested {
+					if j.StopRequested || svc.exiting {
 						return
+					}
+					if r.RetryId < j.Skip {
+						continue
 					}
 					r.Type = "expired"
 					j.Skip = r.RetryId
@@ -168,11 +193,12 @@ func (j *Job) run() error {
 				if err := j.openFile(); err != nil {
 					return err
 				}
+				defer j.close()
 
 				var i int64
 				for {
-					if j.StopRequested {
-						return j.close()
+					if j.StopRequested || svc.exiting {
+						return
 					}
 					msisdn, err := j.nextMsisdn()
 					if err != nil {
@@ -420,9 +446,7 @@ func (j *jobs) getExpiredList(p Params) (expired []rec.Record, err error) {
 		"id_subscription, "+
 		"id_campaign "+
 		"FROM %sretries_expired "+
-		"WHERE "+
-		" operator_code = $1 AND "+
-		" status = '' "+
+		"WHERE operator_code = $1 "+
 		" ORDER BY id  "+
 		" LIMIT %s", // get the last touched
 		svc.conf.db.TablePrefix,
