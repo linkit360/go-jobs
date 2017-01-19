@@ -34,6 +34,7 @@ type Config struct {
 func InitService(
 	appName string,
 	serverConfig config.ServerConfig,
+	jobsConfig config.JobsConfig,
 	inMemConfig inmem_client.RPCClientConfig,
 	dbConf db.DataBaseConfig,
 	notifierConfig amqp.NotifierConfig,
@@ -43,7 +44,7 @@ func InitService(
 	svc.dbConn = db.Init(dbConf)
 	svc.publisher = amqp.NewNotifier(notifierConfig)
 	svc.suspendedSubscriptions = &suspendedSubscriptions{}
-	svc.jobs = initJobs()
+	svc.jobs = initJobs(jobsConfig)
 
 	svc.conf = Config{
 		server:    serverConfig,

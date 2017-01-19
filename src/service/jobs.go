@@ -13,12 +13,14 @@ import (
 	log "github.com/Sirupsen/logrus"
 	"github.com/gin-gonic/gin"
 
+	"github.com/vostrok/jobs/src/config"
 	"github.com/vostrok/utils/amqp"
 	"github.com/vostrok/utils/rec"
 )
 
 type jobs struct {
 	running map[int64]*Job
+	conf    config.JobsConfig
 }
 
 type Job struct {
@@ -47,11 +49,14 @@ type Params struct {
 	OperatorCode int64  `json:"operator_code,omitempty"`
 }
 
-func initJobs() *jobs {
+func initJobs(jConf config.JobsConfig) *jobs {
 	jobs := &jobs{
 		running: make(map[int64]*Job),
+		conf:    jConf,
 	}
-	go jobs.planned()
+	if jConf.PlannedEnabled {
+		go jobs.planned()
+	}
 	return jobs
 }
 func (j *jobs) AddHandlers(r *gin.Engine) {
@@ -62,27 +67,26 @@ func (j *jobs) AddHandlers(r *gin.Engine) {
 	rg.Group("/status").GET("", svc.jobs.status)
 }
 func (j *jobs) planned() {
-	for range time.Tick(time.Second) {
-		jobs, err := j.getList("ready")
-		if err != nil {
-			log.WithFields(log.Fields{
-				"error": err.Error(),
-			}).Error("cannt process")
-			return
-		}
-
-		for _, job := range jobs {
-			if time.Now().Sub(job.RunAt) > 0 && job.Status == "ready" {
-				if err = svc.jobs.startJob(job.Id); err != nil {
-					log.WithFields(log.Fields{
-						"error": err.Error(),
-					}).Error("cannt process")
-				}
-			}
-		}
-	}
+	//for range time.Tick(time.Second) {
+	//	jobs, err := j.getList("ready")
+	//	if err != nil {
+	//		log.WithFields(log.Fields{
+	//			"error": err.Error(),
+	//		}).Error("cannt process")
+	//		return
+	//	}
+	//
+	//	for _, job := range jobs {
+	//		if time.Now().Sub(job.RunAt) > 10 && job.Status == "ready" {
+	//			if err = svc.jobs.startJob(job.Id); err != nil {
+	//				log.WithFields(log.Fields{
+	//					"error": err.Error(),
+	//				}).Error("cannt process")
+	//			}
+	//		}
+	//	}
+	//}
 }
-
 func (j *jobs) start(c *gin.Context) { // start?id=132123
 	idStr, ok := c.GetQuery("id")
 	if !ok {
@@ -159,6 +163,9 @@ func (j *jobs) startJob(id int64) error {
 	svc.jobs.running[id] = &job
 	if job.Type == "injection" {
 		if err := svc.jobs.running[id].openFile(); err != nil {
+			if err := svc.jobs.setStatus("error", id); err != nil {
+				return fmt.Errorf("jobs.setStatus: %s", err.Error())
+			}
 			return err
 		}
 	}
@@ -207,7 +214,7 @@ func (j *Job) run() {
 
 			}
 			if j.Type == "injection" {
-				defer j.close()
+				defer j.closeJob()
 
 				var i int64
 				for {
@@ -260,9 +267,10 @@ func (j *Job) run() {
 }
 func (j *Job) openFile() error {
 	var err error
-	j.fh, err = os.Open(j.FileName)
+	path := svc.jobs.conf.InjectionsPath + "/" + j.FileName
+	j.fh, err = os.Open(path)
 	if err != nil {
-		return fmt.Errorf("os.Open: %s, path: %s", err.Error(), j.FileName)
+		return fmt.Errorf("os.Open: %s, path: %s", err.Error(), path)
 
 	}
 	j.scanner = bufio.NewScanner(j.fh)
@@ -288,7 +296,7 @@ func (j *Job) nextMsisdn() (msisdn string, err error) {
 	}
 	return msisdn, nil
 }
-func (j *Job) close() error {
+func (j *Job) closeJob() error {
 	return j.fh.Close()
 }
 func (j *jobs) stopJob(id int64) error {
@@ -424,7 +432,7 @@ func (j *jobs) get(id int64) (job Job, err error) {
 	return
 }
 func (j *jobs) setStatus(status string, id int64) (err error) {
-	query := fmt.Sprintf("UPDATE %jobs SET status = $1 WHERE id = $2 ",
+	query := fmt.Sprintf("UPDATE %sjobs SET status = $1 WHERE id = $2 ",
 		svc.conf.db.TablePrefix,
 	)
 	_, err = svc.dbConn.Exec(query, status, id)

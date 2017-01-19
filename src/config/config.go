@@ -20,9 +20,15 @@ type ServerConfig struct {
 type AppConfig struct {
 	AppName           string                       `yaml:"app_name"`
 	Server            ServerConfig                 `yaml:"server"`
+	Jobs              JobsConfig                   `yaml:"jobs"`
 	InMemClientConfig inmem_client.RPCClientConfig `yaml:"inmem_client"`
 	DbConf            db.DataBaseConfig            `yaml:"db"`
 	Notifier          amqp.NotifierConfig          `yaml:"publisher"`
+}
+
+type JobsConfig struct {
+	PlannedEnabled bool   `yaml:"planned_enabled" default:"false"`
+	InjectionsPath string `yaml:"injections_path" default:"/var/www/xmp.linkit360.ru/web/injections"`
 }
 
 func LoadConfig() AppConfig {

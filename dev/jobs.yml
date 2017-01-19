@@ -3,6 +3,10 @@ app_name: jobs
 server:
   port: 50303
 
+jobs:
+  planned_enabled: false
+  injections_path: /var/www/xmp.linkit360.ru/web/injections
+
 inmem_client:
   timeout: 10
 
