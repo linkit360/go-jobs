@@ -18,7 +18,7 @@ import (
 type suspendedSubscriptions struct {
 }
 
-type Params struct {
+type SuspendedSubscrptionsParams struct {
 	Limit int
 	Hours int
 }
@@ -46,7 +46,7 @@ func (ss *suspendedSubscriptions) Call(c *gin.Context) {
 		hours = 1
 	}
 
-	params := Params{
+	params := SuspendedSubscrptionsParams{
 		Limit: limit,
 		Hours: hours,
 	}
@@ -59,7 +59,7 @@ func (ss *suspendedSubscriptions) Call(c *gin.Context) {
 	c.JSON(200, count)
 }
 
-func (ss *suspendedSubscriptions) process(p Params) (count int, err error) {
+func (ss *suspendedSubscriptions) process(p SuspendedSubscrptionsParams) (count int, err error) {
 	begin := time.Now()
 	defer func() {
 		log.WithFields(log.Fields{

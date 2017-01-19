@@ -51,7 +51,7 @@ func initJobs() *jobs {
 	jobs := &jobs{
 		running: make(map[int64]*Job),
 	}
-
+	go jobs.planned()
 	return jobs
 }
 func (j *jobs) AddHandlers(r *gin.Engine) {
@@ -62,20 +62,22 @@ func (j *jobs) AddHandlers(r *gin.Engine) {
 	rg.Group("/status").GET("", svc.jobs.status)
 }
 func (j *jobs) planned() {
-	jobs, err := j.getList("ready")
-	if err != nil {
-		log.WithFields(log.Fields{
-			"error": err.Error(),
-		}).Error("cannt process")
-		return
-	}
+	for range time.Tick(time.Second) {
+		jobs, err := j.getList("ready")
+		if err != nil {
+			log.WithFields(log.Fields{
+				"error": err.Error(),
+			}).Error("cannt process")
+			return
+		}
 
-	for _, job := range jobs {
-		if time.Now().Sub(job.RunAt) > 0 && job.Status == "ready" {
-			if err = svc.jobs.startJob(job.Id); err != nil {
-				log.WithFields(log.Fields{
-					"error": err.Error(),
-				}).Error("cannt process")
+		for _, job := range jobs {
+			if time.Now().Sub(job.RunAt) > 0 && job.Status == "ready" {
+				if err = svc.jobs.startJob(job.Id); err != nil {
+					log.WithFields(log.Fields{
+						"error": err.Error(),
+					}).Error("cannt process")
+				}
 			}
 		}
 	}
@@ -153,23 +155,38 @@ func (j *jobs) startJob(id int64) error {
 	if err := svc.jobs.setStatus("in progress", id); err != nil {
 		return fmt.Errorf("jobs.setStatus: %s", err.Error())
 	}
+
 	svc.jobs.running[id] = &job
+	if job.Type == "injection" {
+		if err := svc.jobs.running[id].openFile(); err != nil {
+			return err
+		}
+	}
+
 	svc.jobs.running[id].run()
 	return nil
 }
-func (j *Job) run() error {
+func (j *Job) run() {
+	log.WithFields(log.Fields{
+		"id": j.Id,
+	}).Info("run")
 
 	defer svc.jobs.stopJob(j.Id)
 
 	go func() {
 		for {
 			if j.Type == "expired" {
-				expired, err := svc.jobs.getExpiredList(j.Params)
+				expired, err := svc.jobs.getExpiredList(j.ParsedParams)
 				if err != nil {
-					return fmt.Errorf("svc.jobs.getExpiredList: %s", err.Error())
+					err = fmt.Errorf("svc.jobs.getExpiredList: %s", err.Error())
+					log.WithFields(log.Fields{
+						"error": err.Error(),
+					}).Error("cannt process")
+					return
 				}
 				for idx, r := range expired {
 					if j.StopRequested || svc.exiting {
+						log.WithFields(log.Fields{}).Info("exiting")
 						return
 					}
 					if r.RetryId < j.Skip {
@@ -190,26 +207,31 @@ func (j *Job) run() error {
 
 			}
 			if j.Type == "injection" {
-				if err := j.openFile(); err != nil {
-					return err
-				}
 				defer j.close()
 
 				var i int64
 				for {
 					if j.StopRequested || svc.exiting {
+						log.WithFields(log.Fields{}).Info("exiting")
 						return
 					}
 					msisdn, err := j.nextMsisdn()
 					if err != nil {
-						return err
+						log.WithFields(log.Fields{
+							"error": err.Error(),
+						}).Error("next msisdn")
+						return
 					}
 					if i < j.Skip {
 						i++
 						continue
 					}
 					if len(msisdn) < 5 {
-						return
+						log.WithFields(log.Fields{
+							"error":  "msisdn is too short",
+							"msisdn": msisdn,
+						}).Error("msisdn")
+						continue
 					}
 					r := rec.Record{
 						CampaignId: j.ParsedParams.CampaignId,
@@ -232,16 +254,16 @@ func (j *Job) run() error {
 			}
 
 		}
-		return nil
+		return
 	}()
-	return nil
+	return
 }
 func (j *Job) openFile() error {
 	var err error
 	j.fh, err = os.Open(j.FileName)
 	if err != nil {
-		err = fmt.Errorf("os.Open: %s, path: %s", err.Error(), j.FileName)
-		return
+		return fmt.Errorf("os.Open: %s, path: %s", err.Error(), j.FileName)
+
 	}
 	j.scanner = bufio.NewScanner(j.fh)
 	return nil
@@ -285,7 +307,25 @@ func (j *jobs) stopJob(id int64) error {
 	return nil
 }
 func (j *jobs) getList(status string) (jobs []Job, err error) {
-	query := fmt.Sprintf("SELECT "+
+	begin := time.Now()
+	query := ""
+	defer func() {
+		defer func() {
+			fields := log.Fields{
+				"took": time.Since(begin),
+			}
+			if err != nil {
+				fields["error"] = err.Error()
+				fields["query"] = query
+				log.WithFields(fields).Error("get job list failed")
+			} else {
+				fields["count"] = len(jobs)
+				log.WithFields(fields).Debug("get job list")
+			}
+		}()
+	}()
+
+	query = fmt.Sprintf("SELECT "+
 		"id, "+
 		"id_user, "+
 		"created_at, "+
@@ -373,7 +413,7 @@ func (j *jobs) get(id int64) (job Job, err error) {
 			err = fmt.Errorf("rows.Scan: %s", err.Error())
 			return
 		}
-		return job
+		return
 	}
 	if rows.Err() != nil {
 		DBErrors.Inc()
@@ -411,7 +451,6 @@ func (j *jobs) setSkip(skip int64, id int64) (err error) {
 }
 func (j *jobs) getExpiredList(p Params) (expired []rec.Record, err error) {
 	begin := time.Now()
-	var err error
 	var query string
 	defer func() {
 		defer func() {
@@ -448,12 +487,13 @@ func (j *jobs) getExpiredList(p Params) (expired []rec.Record, err error) {
 		"FROM %sretries_expired "+
 		"WHERE operator_code = $1 "+
 		" ORDER BY id  "+
-		" LIMIT %s", // get the last touched
+		" LIMIT %d", // get the last touched
 		svc.conf.db.TablePrefix,
-		strconv.Itoa(p.Count),
+		p.Count,
 	)
 
-	rows, err := svc.dbConn.Query(query, p.OperatorCode)
+	var rows *sql.Rows
+	rows, err = svc.dbConn.Query(query, p.OperatorCode)
 	if err != nil {
 		DBErrors.Inc()
 		err = fmt.Errorf("db.Query: %s, query: %s", err.Error(), query)
@@ -463,7 +503,7 @@ func (j *jobs) getExpiredList(p Params) (expired []rec.Record, err error) {
 
 	for rows.Next() {
 		record := rec.Record{}
-		if err := rows.Scan(
+		if err = rows.Scan(
 			&record.RetryId,
 			&record.Tid,
 			&record.CreatedAt,
