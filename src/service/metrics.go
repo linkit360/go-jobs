@@ -8,7 +8,6 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 
 	m "github.com/vostrok/utils/metrics"
-	"github.com/vostrok/utils/rec"
 )
 
 var (
@@ -44,7 +43,7 @@ func initMetrics(name string) {
 				log.WithFields(log.Fields{
 					"error": err.Error(),
 				}).Error("get suspended retries")
-				PendingRetriesCount.Set(float64(10000000))
+				PendingRetriesCount.Set(float64(0))
 			} else {
 				PendingRetriesCount.Set(float64(retriesCount))
 			}
@@ -55,20 +54,20 @@ func initMetrics(name string) {
 				log.WithFields(log.Fields{
 					"error": err.Error(),
 				}).Error("get mo")
-				PendingSubscriptionsCount.Set(float64(100000000))
+				PendingSubscriptionsCount.Set(float64(0))
 			} else {
 				PendingSubscriptionsCount.Set(float64(moCount))
 			}
 
-			retriesPeriod, err := rec.GetRetriesPeriod()
+			retriesPeriod, err := getRetriesPeriod()
 			if err != nil {
 				err = fmt.Errorf("rec.GetRetriesPeriod: %s", err.Error())
 				log.WithFields(log.Fields{
 					"error": err.Error(),
 				}).Error("get retries period")
-				RetriesPeriod.Set(float64(100000000))
+				RetriesPeriod.Set(float64(0))
 			} else {
-				RetriesPeriod.Set(float64(retriesPeriod))
+				RetriesPeriod.Set(retriesPeriod)
 			}
 		}
 	}()
@@ -173,4 +172,53 @@ func getSuspendedSubscriptionsCount() (count int, err error) {
 	}
 
 	return count, nil
+}
+
+func getRetriesPeriod() (seconds float64, err error) {
+	begin := time.Now()
+	defer func() {
+		defer func() {
+			fields := log.Fields{
+				"took": time.Since(begin),
+			}
+			if err != nil {
+				fields["error"] = err.Error()
+				log.WithFields(fields).Error("get retries period failed")
+			} else {
+				log.WithFields(fields).Debug("get retries period")
+			}
+		}()
+	}()
+
+	query := fmt.Sprintf("SELECT coalesce((SELECT extract (epoch from (now() - "+
+		"MIN(last_pay_attempt_at))::interval) seconds from %sretries), 0)",
+		svc.conf.db.TablePrefix,
+	)
+	rows, err := svc.dbConn.Query(query)
+	if err != nil {
+		DBErrors.Inc()
+
+		err = fmt.Errorf("db.Query: %s, query: %s", err.Error(), query)
+		return 0, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		if err = rows.Scan(
+			&seconds,
+		); err != nil {
+			DBErrors.Inc()
+
+			err = fmt.Errorf("rows.Scan: %s", err.Error())
+			return
+		}
+	}
+	if rows.Err() != nil {
+		DBErrors.Inc()
+
+		err = fmt.Errorf("rows.Err: %s", err.Error())
+		return
+	}
+
+	return
 }
