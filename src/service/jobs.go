@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	log "github.com/Sirupsen/logrus"
@@ -44,14 +45,13 @@ type Job struct {
 	finished      bool           `json:"finished"`
 }
 type Params struct {
-	DateFrom     string `json:"date_from,omitempty"`
-	DateTo       string `json:"date_to,omitempty"`
-	Count        int64  `json:"count,omitempty"`
-	Order        string `json:"order,omitempty"`
-	Never        int    `json:"never,omitempty"`
-	ServiceId    int64  `json:"service_id,omitempty"`
-	CampaignId   int64  `json:"campaign_id,omitempty"`
-	OperatorCode int64  `json:"operator_code,omitempty"`
+	DateFrom   string `json:"date_from,omitempty"`
+	DateTo     string `json:"date_to,omitempty"`
+	Count      int64  `json:"count,omitempty"`
+	Order      string `json:"order,omitempty"`
+	Never      int    `json:"never,omitempty"`
+	ServiceId  int64  `json:"service_id,omitempty"`
+	CampaignId int64  `json:"campaign_id,omitempty"`
 }
 
 func initJobs(jConf config.JobsConfig) *jobs {
@@ -356,7 +356,7 @@ func (j *jobs) stopJobs() {
 			log.WithFields(log.Fields{
 				"id":       k,
 				"finished": j.running[k].finished,
-			}).Debug("finish check started")
+			}).Debug("	finish check started")
 			if j.running[k].finished {
 				if err := j.stopJob(j.running[k].Id, "done"); err != nil {
 					log.WithFields(log.Fields{
@@ -515,6 +515,7 @@ func (j *jobs) setSkip(skip int64, id int64) (err error) {
 
 	return
 }
+
 func (j *jobs) getExpiredList(p Params) (expired []rec.Record, err error) {
 	begin := time.Now()
 	var query string
@@ -535,6 +536,58 @@ func (j *jobs) getExpiredList(p Params) (expired []rec.Record, err error) {
 		}()
 	}()
 
+	argsCount := 0
+	args := []interface{}{}
+	wheres := []string{}
+	if p.DateFrom != "" {
+		argsCount++
+		args = append(args, p.DateFrom)
+		wheres = append(wheres, "created_at > ")
+	}
+	if p.DateTo != "" {
+		args = append(args, p.DateTo)
+		wheres = append(wheres, "created_at < ")
+	}
+
+	if p.ServiceId > 0 {
+		args = append(args, p.ServiceId)
+		wheres = append(wheres, "id_service = ")
+	}
+
+	if p.CampaignId > 0 {
+		args = append(args, p.CampaignId)
+		wheres = append(wheres, "id_campaign = ")
+	}
+	if p.Never > 0 {
+		notPaidInDays := fmt.Sprintf("msisdn NOT IN ("+
+			" SELECT DISTINCT msisdn "+
+			" FROM %stransactions "+
+			" WHERE sent_at > (CURRENT_TIMESTAMP -  INTERVAL '%d days' ) AND "+
+			"       ( result = 'paid' OR result = 'retry_paid') )",
+			svc.conf.db.TablePrefix,
+			p.Never,
+		)
+		wheres = append(wheres, notPaidInDays)
+	}
+
+	countWhere := ""
+	if p.Count > 0 {
+		countWhere = fmt.Sprintf(" LIMIT %d", p.Count)
+	}
+
+	whereClauses := []string{}
+	for k, v := range wheres {
+		whereClauses = v + "$" + strconv.Itoa(k+1)
+	}
+	where := strings.Join(whereClauses, " AND ")
+	if where != "" {
+		where = "WHERE " + where
+	}
+
+	orderTypeWhere := " ORDER BY id ASC "
+	if p.Order != "" {
+		orderTypeWhere = " ORDER BY id " + p.Order
+	}
 	query = fmt.Sprintf("SELECT "+
 		"id, "+
 		"tid, "+
@@ -551,15 +604,15 @@ func (j *jobs) getExpiredList(p Params) (expired []rec.Record, err error) {
 		"id_subscription, "+
 		"id_campaign "+
 		"FROM %sretries_expired "+
-		"WHERE operator_code = $1 "+
-		" ORDER BY id  "+
-		" LIMIT %d", // get the last touched
+		where+
+		orderTypeWhere+
+		countWhere,
 		svc.conf.db.TablePrefix,
 		p.Count,
 	)
 
 	var rows *sql.Rows
-	rows, err = svc.dbConn.Query(query, p.OperatorCode)
+	rows, err = svc.dbConn.Query(query, args)
 	if err != nil {
 		DBErrors.Inc()
 		err = fmt.Errorf("db.Query: %s, query: %s", err.Error(), query)
