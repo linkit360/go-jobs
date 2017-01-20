@@ -18,6 +18,10 @@ import (
 	"github.com/vostrok/utils/rec"
 )
 
+func init() {
+	log.SetLevel(log.DebugLevel)
+}
+
 type jobs struct {
 	running map[int64]*Job
 	conf    config.JobsConfig
@@ -131,7 +135,7 @@ func (j *jobs) stop(c *gin.Context) {
 		})
 		return
 	}
-	if err := j.stopJob(id); err != nil {
+	if err := j.stopJob(id, "cancelled"); err != nil {
 		err = fmt.Errorf("strconv.ParseInt: :%s", err.Error())
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error": err.Error(),
@@ -162,14 +166,14 @@ func (j *jobs) startJob(id int64) error {
 	if err := json.Unmarshal([]byte(job.Params), &p); err != nil {
 		return fmt.Errorf("json.Unmarshal: %s, Params: %s", err.Error(), job.Params)
 	}
-	if err := svc.jobs.setStatus("in progress", id); err != nil {
+	if err := svc.jobs.setStatus(id, "in progress"); err != nil {
 		return fmt.Errorf("jobs.setStatus: %s", err.Error())
 	}
 
 	svc.jobs.running[id] = &job
 	if job.Type == "injection" {
 		if err := svc.jobs.running[id].openFile(); err != nil {
-			if err := svc.jobs.setStatus("error", id); err != nil {
+			if err := svc.jobs.setStatus(id, "error"); err != nil {
 				return fmt.Errorf("jobs.setStatus: %s", err.Error())
 			}
 			return err
@@ -195,7 +199,7 @@ func (j *Job) run() {
 					log.WithFields(log.Fields{
 						"error": err.Error(),
 					}).Error("cannt process")
-					j.finished = true
+					svc.jobs.running[j.Id].finished = true
 					return
 				}
 				for idx, r := range expired {
@@ -204,7 +208,7 @@ func (j *Job) run() {
 							"jobStop": j.StopRequested,
 							"service": svc.exiting,
 						}).Info("exiting")
-						j.finished = true
+						svc.jobs.running[j.Id].finished = true
 						return
 					}
 					if r.RetryId < j.Skip {
@@ -222,7 +226,10 @@ func (j *Job) run() {
 						continue
 					}
 				}
-				j.finished = true
+				log.WithFields(log.Fields{
+					"count": len(expired),
+				}).Info("done")
+				svc.jobs.running[j.Id].finished = true
 			}
 
 			if j.Type == "injection" {
@@ -235,7 +242,7 @@ func (j *Job) run() {
 							"jobStop": j.StopRequested,
 							"service": svc.exiting,
 						}).Info("exiting")
-						j.finished = true
+						svc.jobs.running[j.Id].finished = true
 						return
 					}
 					msisdn, err := j.nextMsisdn()
@@ -243,7 +250,7 @@ func (j *Job) run() {
 						log.WithFields(log.Fields{
 							"error": err.Error(),
 						}).Error("next msisdn")
-						j.finished = true
+						svc.jobs.running[j.Id].finished = true
 						return
 					}
 					if i < j.Skip {
@@ -251,8 +258,8 @@ func (j *Job) run() {
 						continue
 					}
 					if msisdn == "" && err == nil {
-						log.WithFields(log.Fields{}).Info("done")
-						j.finished = true
+						log.WithFields(log.Fields{"count": i}).Info("done")
+						svc.jobs.running[j.Id].finished = true
 						return
 					}
 					if len(msisdn) < 5 {
@@ -278,6 +285,9 @@ func (j *Job) run() {
 						time.Sleep(time.Second)
 						continue
 					}
+					log.WithFields(log.Fields{
+						"tid": r.Tid,
+					}).Error("sent")
 					i++
 				}
 			}
@@ -321,7 +331,7 @@ func (j *Job) nextMsisdn() (msisdn string, err error) {
 func (j *Job) closeJob() error {
 	return j.fh.Close()
 }
-func (j *jobs) stopJob(id int64) error {
+func (j *jobs) stopJob(id int64, status string) error {
 	log.WithFields(log.Fields{
 		"id": id,
 	}).Info("stop")
@@ -330,7 +340,8 @@ func (j *jobs) stopJob(id int64) error {
 		return fmt.Errorf("Not found: %d", id)
 	}
 	svc.jobs.running[id].StopRequested = true
-	if err := j.setStatus("cancelled", id); err != nil {
+
+	if err := j.setStatus(id, status); err != nil {
 		return fmt.Errorf("j.setStatus: %s", err.Error())
 	}
 	if err := j.setSkip(svc.jobs.running[id].Skip, id); err != nil {
@@ -340,13 +351,23 @@ func (j *jobs) stopJob(id int64) error {
 	return nil
 }
 func (j *jobs) stopJobs() {
-	for k, _ := range j.running {
-		if j.running[k].finished {
-			if err := j.stopJob(j.running[k].Id); err != nil {
-				log.WithFields(log.Fields{
-					"id":    k,
-					"error": err.Error(),
-				}).Error("stop")
+	for range time.Tick(time.Second) {
+		for k, _ := range j.running {
+			log.WithFields(log.Fields{
+				"id":       k,
+				"finished": j.running[k].finished,
+			}).Debug("finish check started")
+			if j.running[k].finished {
+				if err := j.stopJob(j.running[k].Id, "done"); err != nil {
+					log.WithFields(log.Fields{
+						"id":    k,
+						"error": err.Error(),
+					}).Error("stop")
+				} else {
+					log.WithFields(log.Fields{
+						"id": k,
+					}).Debug("finished")
+				}
 			}
 		}
 	}
@@ -468,7 +489,7 @@ func (j *jobs) get(id int64) (job Job, err error) {
 	err = fmt.Errorf("Not found: %d", id)
 	return
 }
-func (j *jobs) setStatus(status string, id int64) (err error) {
+func (j *jobs) setStatus(id int64, status string) (err error) {
 	query := fmt.Sprintf("UPDATE %sjobs SET status = $1 WHERE id = $2 ",
 		svc.conf.db.TablePrefix,
 	)
@@ -482,7 +503,7 @@ func (j *jobs) setStatus(status string, id int64) (err error) {
 	return
 }
 func (j *jobs) setSkip(skip int64, id int64) (err error) {
-	query := fmt.Sprintf("UPDATE %jobs SET skip = $1 WHERE id = $2 ",
+	query := fmt.Sprintf("UPDATE %sjobs SET skip = $1 WHERE id = $2 ",
 		svc.conf.db.TablePrefix,
 	)
 	_, err = svc.dbConn.Exec(query, skip, id)
