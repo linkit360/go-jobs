@@ -2,6 +2,7 @@ package config
 
 import (
 	"flag"
+	"fmt"
 	"os"
 	"strings"
 
@@ -29,6 +30,7 @@ type AppConfig struct {
 type JobsConfig struct {
 	PlannedEnabled bool   `yaml:"planned_enabled" default:"false"`
 	InjectionsPath string `yaml:"injections_path" default:"/var/www/xmp.linkit360.ru/web/injections"`
+	CheckPrefix    string `yaml:"prefix" default:"92"` // todo: move in settings or in db smth
 }
 
 func LoadConfig() AppConfig {
@@ -51,7 +53,7 @@ func LoadConfig() AppConfig {
 	appConfig.Server.Port = envString("PORT", appConfig.Server.Port)
 	appConfig.Notifier.Conn.Host = envString("RBMQ_HOST", appConfig.Notifier.Conn.Host)
 
-	log.WithField("config", appConfig).Info("Config loaded")
+	log.WithField("config", fmt.Sprintf("%#v", appConfig)).Info("Config")
 	return appConfig
 }
 

@@ -6,6 +6,7 @@ server:
 jobs:
   planned_enabled: false
   injections_path: /var/www/xmp.linkit360.ru/web/injections
+  check_prefix: 92
 
 inmem_client:
   timeout: 10

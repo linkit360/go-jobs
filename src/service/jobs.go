@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	log "github.com/Sirupsen/logrus"
 	"github.com/gin-gonic/gin"
@@ -52,6 +53,12 @@ type Params struct {
 	Never      int    `json:"never,omitempty"`
 	ServiceId  int64  `json:"service_id,omitempty"`
 	CampaignId int64  `json:"campaign_id,omitempty"`
+	DryRun     bool   `json:"dry_run,omitempty"`
+}
+
+func (p Params) ToString() string {
+	s, _ := json.Marshal(p)
+	return string(s)
 }
 
 func initJobs(jConf config.JobsConfig) *jobs {
@@ -85,7 +92,7 @@ func (j *jobs) planned() {
 
 		for _, job := range jobs {
 			if time.Now().Sub(job.RunAt) > 10 && job.Status == "ready" {
-				if err = svc.jobs.startJob(job.Id); err != nil {
+				if err = svc.jobs.startJob(job.Id, false); err != nil {
 					log.WithFields(log.Fields{
 						"error": err.Error(),
 					}).Error("cannt process")
@@ -110,8 +117,11 @@ func (j *jobs) start(c *gin.Context) { // start?id=132123
 		})
 		return
 	}
-	if err := j.startJob(id); err != nil {
-		err = fmt.Errorf("strconv.ParseInt: :%s", err.Error())
+	resume := false
+	if strings.Contains(c.Request.URL.Path, "resume") {
+		resume = true
+	}
+	if err := j.startJob(id, resume); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error": err.Error(),
 		})
@@ -154,7 +164,7 @@ func (j *jobs) status(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, jobs)
 }
-func (j *jobs) startJob(id int64) error {
+func (j *jobs) startJob(id int64, resume bool) error {
 	log.WithFields(log.Fields{
 		"id": id,
 	}).Info("start")
@@ -162,29 +172,57 @@ func (j *jobs) startJob(id int64) error {
 	if err != nil {
 		return err
 	}
-	var p Params
-	if err := json.Unmarshal([]byte(job.Params), &p); err != nil {
-		return fmt.Errorf("json.Unmarshal: %s, Params: %s", err.Error(), job.Params)
+	if job.Status != "ready" {
+		err = fmt.Errorf("Job status: %s", job.Status)
+		log.WithFields(log.Fields{
+			"id":    id,
+			"error": err.Error(),
+		}).Info("failed")
+		return err
 	}
+	if err := json.Unmarshal([]byte(job.Params), &job.ParsedParams); err != nil {
+		err = fmt.Errorf("json.Unmarshal: %s, Params: %s", err.Error(), job.Params)
+		log.WithFields(log.Fields{
+			"id":    id,
+			"error": err.Error(),
+		}).Info("failed")
+		return err
+	}
+
 	if err := svc.jobs.setStatus(id, "in progress"); err != nil {
-		return fmt.Errorf("jobs.setStatus: %s", err.Error())
+		err = fmt.Errorf("jobs.setStatus: %s", err.Error())
+		log.WithFields(log.Fields{
+			"id":    id,
+			"error": err.Error(),
+		}).Info("failed")
+		return err
 	}
 
 	svc.jobs.running[id] = &job
 	if job.Type == "injection" {
 		if err := svc.jobs.running[id].openFile(); err != nil {
 			if err := svc.jobs.setStatus(id, "error"); err != nil {
-				return fmt.Errorf("jobs.setStatus: %s", err.Error())
+				err = fmt.Errorf("jobs.setStatus: %s", err.Error())
+				log.WithFields(log.Fields{
+					"id":    id,
+					"error": err.Error(),
+				}).Info("failed to set job status")
+				return err
 			}
+			err = fmt.Errorf("run job: %s", err.Error())
+			log.WithFields(log.Fields{
+				"id":    id,
+				"error": err.Error(),
+			}).Info("failed")
 			return err
 		}
 	}
 
-	svc.jobs.running[id].run()
+	svc.jobs.running[id].run(resume)
 	return nil
 }
 
-func (j *Job) run() {
+func (j *Job) run(resume bool) {
 	log.WithFields(log.Fields{
 		"id":  j.Id,
 		"job": fmt.Sprintf("%#v", j),
@@ -196,27 +234,35 @@ func (j *Job) run() {
 				expired, err := svc.jobs.getExpiredList(j.ParsedParams)
 				if err != nil {
 					err = fmt.Errorf("svc.jobs.getExpiredList: %s", err.Error())
-					log.WithFields(log.Fields{
-						"error": err.Error(),
-					}).Error("cannt process")
 					svc.jobs.running[j.Id].finished = true
+					log.WithFields(log.Fields{
+						"error":    err.Error(),
+						"finished": svc.jobs.running[j.Id].finished,
+					}).Error("cannt process")
 					return
 				}
 				for idx, r := range expired {
 					if j.StopRequested || svc.exiting {
-						log.WithFields(log.Fields{
-							"jobStop": j.StopRequested,
-							"service": svc.exiting,
-						}).Info("exiting")
 						svc.jobs.running[j.Id].finished = true
+						log.WithFields(log.Fields{
+							"jobStop":  j.StopRequested,
+							"service":  svc.exiting,
+							"finished": svc.jobs.running[j.Id].finished,
+						}).Info("exiting")
 						return
 					}
-					if r.RetryId < j.Skip {
+					if resume && r.RetryId < j.Skip {
+						log.WithFields(log.Fields{
+							"tid": r.Tid,
+							"id":  r.RetryId,
+						}).Info("skip")
 						continue
+					} else {
+						resume = false
 					}
 					r.Type = "expired"
 					j.Skip = r.RetryId
-					if err := svc.jobs.sendToMobilinkRequests(0, r); err != nil {
+					if err := j.sendToMobilinkRequests(0, r); err != nil {
 						log.WithFields(log.Fields{
 							"error": err.Error(),
 							"id":    r.RetryId,
@@ -224,12 +270,19 @@ func (j *Job) run() {
 						time.Sleep(time.Second)
 						idx = idx - 1
 						continue
+					} else {
+						log.WithFields(log.Fields{
+							"tid": r.Tid,
+						}).Info("sent")
 					}
 				}
-				log.WithFields(log.Fields{
-					"count": len(expired),
-				}).Info("done")
 				svc.jobs.running[j.Id].finished = true
+				log.WithFields(log.Fields{
+					"id":       j.Id,
+					"count":    len(expired),
+					"finished": svc.jobs.running[j.Id].finished,
+				}).Info("done")
+				return
 			}
 
 			if j.Type == "injection" {
@@ -245,13 +298,14 @@ func (j *Job) run() {
 						svc.jobs.running[j.Id].finished = true
 						return
 					}
-					msisdn, err := j.nextMsisdn()
+					orig, msisdn, err := j.nextMsisdn()
 					if err != nil {
 						log.WithFields(log.Fields{
-							"error": err.Error(),
-						}).Error("next msisdn")
-						svc.jobs.running[j.Id].finished = true
-						return
+							"orig":   orig,
+							"msisdn": msisdn,
+							"error":  err.Error(),
+						}).Error("wrong msisdn")
+						continue
 					}
 					if i < j.Skip {
 						i++
@@ -277,7 +331,7 @@ func (j *Job) run() {
 					}
 					r.Type = "injection"
 					j.Skip = i
-					if err := svc.jobs.sendToMobilinkRequests(0, r); err != nil {
+					if err := j.sendToMobilinkRequests(0, r); err != nil {
 						log.WithFields(log.Fields{
 							"error": err.Error(),
 							"id":    r.RetryId,
@@ -286,7 +340,8 @@ func (j *Job) run() {
 						continue
 					}
 					log.WithFields(log.Fields{
-						"tid": r.Tid,
+						"tid":    r.Tid,
+						"msisdn": r.Msisdn,
 					}).Error("sent")
 					i++
 				}
@@ -299,6 +354,10 @@ func (j *Job) run() {
 }
 func (j *Job) openFile() error {
 	var err error
+	if j.FileName == "" {
+		return fmt.Errorf("File name is empty: %s", j.FileName)
+	}
+
 	path := svc.jobs.conf.InjectionsPath + "/" + j.FileName
 	j.fh, err = os.Open(path)
 	if err != nil {
@@ -308,16 +367,21 @@ func (j *Job) openFile() error {
 	j.scanner = bufio.NewScanner(j.fh)
 	return nil
 }
-func (j *Job) nextMsisdn() (msisdn string, err error) {
+func TrimToNum(r rune) bool {
+	return !unicode.IsDigit(r)
+}
+func (j *Job) nextMsisdn() (orig, msisdn string, err error) {
 
 	if !j.scanner.Scan() {
-		if err := j.scanner.Err(); err != nil {
-			return "", fmt.Errorf("scanner.Error: %s", err.Error())
+		if err = j.scanner.Err(); err != nil {
+			err = fmt.Errorf("scanner.Error: %s", err.Error())
+			return
 		}
 		// eof
-		return "", nil
+		return "", "", nil
 	}
-	msisdn = j.scanner.Text()
+	orig = j.scanner.Text()
+	msisdn = strings.TrimFunc(orig, TrimToNum)
 	if len(msisdn) > 35 {
 		err = fmt.Errorf("Too long msisdn: %s", msisdn)
 		return
@@ -326,7 +390,11 @@ func (j *Job) nextMsisdn() (msisdn string, err error) {
 		err = fmt.Errorf("Too short msisdn: %s", msisdn)
 		return
 	}
-	return msisdn, nil
+	if !strings.HasPrefix(msisdn, svc.jobs.conf.CheckPrefix) {
+		err = fmt.Errorf("Wrong prefix: %s", msisdn)
+		return
+	}
+	return
 }
 func (j *Job) closeJob() error {
 	return j.fh.Close()
@@ -334,7 +402,7 @@ func (j *Job) closeJob() error {
 func (j *jobs) stopJob(id int64, status string) error {
 	log.WithFields(log.Fields{
 		"id": id,
-	}).Info("stop")
+	}).Info("stop...")
 	_, ok := svc.jobs.running[id]
 	if !ok {
 		return fmt.Errorf("Not found: %d", id)
@@ -348,17 +416,16 @@ func (j *jobs) stopJob(id int64, status string) error {
 		return fmt.Errorf("j.setSkip: %s", err.Error())
 	}
 	delete(svc.jobs.running, id)
+	log.WithFields(log.Fields{
+		"id": id,
+	}).Info("removed from running")
 	return nil
 }
 func (j *jobs) stopJobs() {
 	for range time.Tick(time.Second) {
 		for k, _ := range j.running {
-			log.WithFields(log.Fields{
-				"id":       k,
-				"finished": j.running[k].finished,
-			}).Debug("	finish check started")
 			if j.running[k].finished {
-				if err := j.stopJob(j.running[k].Id, "done"); err != nil {
+				if err := j.stopJob(k, "done"); err != nil {
 					log.WithFields(log.Fields{
 						"id":    k,
 						"error": err.Error(),
@@ -524,23 +591,21 @@ func (j *jobs) getExpiredList(p Params) (expired []rec.Record, err error) {
 			fields := log.Fields{
 				"took":  time.Since(begin),
 				"limit": p.Count,
-				//"query":         query,
+				"query": query,
 			}
 			if err != nil {
 				fields["error"] = err.Error()
 				log.WithFields(fields).Error("load expired retries failed")
 			} else {
 				fields["count"] = len(expired)
-				log.WithFields(fields).Debug("load expired  retries")
+				log.WithFields(fields).Debug("load expired retries")
 			}
 		}()
 	}()
 
-	argsCount := 0
 	args := []interface{}{}
 	wheres := []string{}
 	if p.DateFrom != "" {
-		argsCount++
 		args = append(args, p.DateFrom)
 		wheres = append(wheres, "created_at > ")
 	}
@@ -577,7 +642,7 @@ func (j *jobs) getExpiredList(p Params) (expired []rec.Record, err error) {
 
 	whereClauses := []string{}
 	for k, v := range wheres {
-		whereClauses = v + "$" + strconv.Itoa(k+1)
+		whereClauses = append(whereClauses, v+"$"+strconv.Itoa(k+1))
 	}
 	where := strings.Join(whereClauses, " AND ")
 	if where != "" {
@@ -588,7 +653,14 @@ func (j *jobs) getExpiredList(p Params) (expired []rec.Record, err error) {
 	if p.Order != "" {
 		orderTypeWhere = " ORDER BY id " + p.Order
 	}
+	log.WithFields(log.Fields{
+		"args":   fmt.Sprintf("%#v", args),
+		"where":  where,
+		"params": p.ToString(),
+	}).Debug("run query")
+
 	query = fmt.Sprintf("SELECT "+
+		"msisdn, "+
 		"id, "+
 		"tid, "+
 		"created_at, "+
@@ -596,7 +668,6 @@ func (j *jobs) getExpiredList(p Params) (expired []rec.Record, err error) {
 		"attempts_count, "+
 		"keep_days, "+
 		"delay_hours, "+
-		"msisdn, "+
 		"price, "+
 		"operator_code, "+
 		"country_code, "+
@@ -608,11 +679,10 @@ func (j *jobs) getExpiredList(p Params) (expired []rec.Record, err error) {
 		orderTypeWhere+
 		countWhere,
 		svc.conf.db.TablePrefix,
-		p.Count,
 	)
 
 	var rows *sql.Rows
-	rows, err = svc.dbConn.Query(query, args)
+	rows, err = svc.dbConn.Query(query, args...)
 	if err != nil {
 		DBErrors.Inc()
 		err = fmt.Errorf("db.Query: %s, query: %s", err.Error(), query)
@@ -623,6 +693,7 @@ func (j *jobs) getExpiredList(p Params) (expired []rec.Record, err error) {
 	for rows.Next() {
 		record := rec.Record{}
 		if err = rows.Scan(
+			&record.Msisdn,
 			&record.RetryId,
 			&record.Tid,
 			&record.CreatedAt,
@@ -630,7 +701,6 @@ func (j *jobs) getExpiredList(p Params) (expired []rec.Record, err error) {
 			&record.AttemptsCount,
 			&record.KeepDays,
 			&record.DelayHours,
-			&record.Msisdn,
 			&record.Price,
 			&record.OperatorCode,
 			&record.CountryCode,
@@ -652,7 +722,10 @@ func (j *jobs) getExpiredList(p Params) (expired []rec.Record, err error) {
 	}
 	return expired, nil
 }
-func (j *jobs) sendToMobilinkRequests(priority uint8, r rec.Record) (err error) {
+func (j *Job) sendToMobilinkRequests(priority uint8, r rec.Record) (err error) {
+	if j.ParsedParams.DryRun {
+		return nil
+	}
 	event := amqp.EventNotify{
 		EventName: "charge",
 		EventData: r,
