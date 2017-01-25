@@ -69,7 +69,7 @@ func (ss *suspendedSubscriptions) process(p SuspendedSubscrptionsParams) (count 
 		}).Debug("get notpaid subscriptions")
 	}()
 
-	records, err := ss.Get(41001, p.Hours, p.Limit)
+	records, err := ss.get(41001, p.Hours, p.Limit)
 	if err != nil {
 		err = fmt.Errorf("rec.GetSuspendedSubscriptions: %s", err.Error())
 		return
@@ -97,7 +97,7 @@ func (ss *suspendedSubscriptions) process(p SuspendedSubscrptionsParams) (count 
 	return
 }
 
-func (ss *suspendedSubscriptions) Get(operatorCode int64, hours, limit int) (records []rec.Record, err error) {
+func (ss *suspendedSubscriptions) get(operatorCode int64, hours, limit int) (records []rec.Record, err error) {
 	query := fmt.Sprintf("SELECT "+
 		"id, "+
 		"tid, "+

@@ -270,10 +270,6 @@ func (j *Job) run(resume bool) {
 						time.Sleep(time.Second)
 						idx = idx - 1
 						continue
-					} else {
-						log.WithFields(log.Fields{
-							"tid": r.Tid,
-						}).Info("sent")
 					}
 				}
 				svc.jobs.running[j.Id].finished = true
@@ -304,7 +300,7 @@ func (j *Job) run(resume bool) {
 							"orig":   orig,
 							"msisdn": msisdn,
 							"error":  err.Error(),
-						}).Error("wrong msisdn")
+						}).Error("skip")
 						continue
 					}
 					if i < j.Skip {
@@ -316,37 +312,31 @@ func (j *Job) run(resume bool) {
 						svc.jobs.running[j.Id].finished = true
 						return
 					}
-					if len(msisdn) < 5 {
-						log.WithFields(log.Fields{
-							"error":  "msisdn is too short",
-							"msisdn": msisdn,
-						}).Error("msisdn")
-						continue
-					}
 					r := rec.Record{
 						CampaignId: j.ParsedParams.CampaignId,
 						ServiceId:  j.ParsedParams.ServiceId,
 						Msisdn:     msisdn,
 						Tid:        rec.GenerateTID(),
 					}
+					log.WithFields(log.Fields{
+						"tid":    r.Tid,
+						"msisdn": r.Msisdn,
+					}).Info("ok")
 					r.Type = "injection"
 					j.Skip = i
+				send:
 					if err := j.sendToMobilinkRequests(0, r); err != nil {
+
 						log.WithFields(log.Fields{
 							"error": err.Error(),
 							"id":    r.RetryId,
 						}).Error("cannt process")
 						time.Sleep(time.Second)
-						continue
+						goto send
 					}
-					log.WithFields(log.Fields{
-						"tid":    r.Tid,
-						"msisdn": r.Msisdn,
-					}).Error("sent")
 					i++
 				}
 			}
-
 		}
 		return
 	}()
@@ -382,12 +372,12 @@ func (j *Job) nextMsisdn() (orig, msisdn string, err error) {
 	}
 	orig = j.scanner.Text()
 	msisdn = strings.TrimFunc(orig, TrimToNum)
-	if len(msisdn) > 35 {
-		err = fmt.Errorf("Too long msisdn: %s", msisdn)
+	if len(msisdn) > 20 {
+		err = fmt.Errorf("Too long msisdn, length: %d", len(msisdn))
 		return
 	}
 	if len(msisdn) < 5 {
-		err = fmt.Errorf("Too short msisdn: %s", msisdn)
+		err = fmt.Errorf("Too short msisdn, length: %d", len(msisdn))
 		return
 	}
 	if !strings.HasPrefix(msisdn, svc.jobs.conf.CheckPrefix) {
@@ -736,5 +726,8 @@ func (j *Job) sendToMobilinkRequests(priority uint8, r rec.Record) (err error) {
 		return
 	}
 	svc.publisher.Publish(amqp.AMQPMessage{QueueName: "mobilink_requests", Priority: priority, Body: body})
+	log.WithFields(log.Fields{
+		"tid": r.Tid,
+	}).Info("sent")
 	return nil
 }
