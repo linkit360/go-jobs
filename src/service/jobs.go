@@ -583,7 +583,7 @@ func (j *jobs) setStatus(id int64, status string) (err error) {
 }
 func (j *jobs) setSkip(skip int64, id int64) (err error) {
 
-	query := fmt.Sprintf("UPDATE %sjobs SET skip = $1, finish_at =$2 WHERE id = $3",
+	query := fmt.Sprintf("UPDATE %sjobs SET skip = $1, finished_at =$2 WHERE id = $3",
 		svc.conf.db.TablePrefix,
 	)
 	finishAt := time.Now().UTC()
