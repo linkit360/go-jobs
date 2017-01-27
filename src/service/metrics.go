@@ -17,6 +17,8 @@ var (
 	PendingSubscriptionsCount prometheus.Gauge
 	PendingRetriesCount       prometheus.Gauge
 	RetriesPeriod             prometheus.Gauge
+	RetriesCount              prometheus.Gauge
+	ExpiredRetriesCount       prometheus.Gauge
 )
 
 func initMetrics(name string) {
@@ -26,6 +28,8 @@ func initMetrics(name string) {
 	PendingSubscriptionsCount = m.PrometheusGauge("pending", "subscriptions", "count", "pending subscriptions count")
 	PendingRetriesCount = m.PrometheusGauge("pending", "retries", "count", "pending retries count")
 	RetriesPeriod = m.PrometheusGauge("retries", "period", "seconds", "retries period seconds")
+	RetriesCount = m.PrometheusGauge("retries", "", "count", "retries count")
+	ExpiredRetriesCount = m.PrometheusGauge("retries", "expired", "count", "expired retries count")
 
 	go func() {
 		for range time.Tick(time.Minute) {
@@ -36,10 +40,10 @@ func initMetrics(name string) {
 	}()
 
 	go func() {
-		for range time.Tick(5 * time.Minute) {
+		for range time.Tick(time.Minute) {
 			retriesCount, err := getSuspendedRetriesCount()
 			if err != nil {
-				err = fmt.Errorf("rec.GetSuspendedRetriesCount: %s", err.Error())
+				err = fmt.Errorf("getSuspendedRetriesCount: %s", err.Error())
 				log.WithFields(log.Fields{
 					"error": err.Error(),
 				}).Error("get suspended retries")
@@ -50,7 +54,7 @@ func initMetrics(name string) {
 
 			moCount, err := getSuspendedSubscriptionsCount()
 			if err != nil {
-				err = fmt.Errorf("rec.GetSuspendedSubscriptionsCount: %s", err.Error())
+				err = fmt.Errorf("getSuspendedSubscriptionsCount: %s", err.Error())
 				log.WithFields(log.Fields{
 					"error": err.Error(),
 				}).Error("get mo")
@@ -61,13 +65,35 @@ func initMetrics(name string) {
 
 			retriesPeriod, err := getRetriesPeriod()
 			if err != nil {
-				err = fmt.Errorf("rec.GetRetriesPeriod: %s", err.Error())
+				err = fmt.Errorf("getRetriesPeriod: %s", err.Error())
 				log.WithFields(log.Fields{
 					"error": err.Error(),
 				}).Error("get retries period")
 				RetriesPeriod.Set(float64(0))
 			} else {
 				RetriesPeriod.Set(retriesPeriod)
+			}
+
+			retriesTotalCount, err := getRetriesCount()
+			if err != nil {
+				err = fmt.Errorf("getRetriesCount: %s", err.Error())
+				log.WithFields(log.Fields{
+					"error": err.Error(),
+				}).Error("get retries count")
+				RetriesCount.Set(float64(0))
+			} else {
+				RetriesCount.Set(float64(retriesTotalCount))
+			}
+
+			expiredRetriesTotalCount, err := getExpiredRetriesCount()
+			if err != nil {
+				err = fmt.Errorf("getExpiredRetriesCount: %s", err.Error())
+				log.WithFields(log.Fields{
+					"error": err.Error(),
+				}).Error("get expired retries count")
+				ExpiredRetriesCount.Set(float64(0))
+			} else {
+				ExpiredRetriesCount.Set(float64(expiredRetriesTotalCount))
 			}
 		}
 	}()
@@ -220,5 +246,96 @@ func getRetriesPeriod() (seconds float64, err error) {
 		return
 	}
 
+	return
+}
+
+func getRetriesCount() (count float64, err error) {
+	begin := time.Now()
+	defer func() {
+		defer func() {
+			fields := log.Fields{
+				"took": time.Since(begin),
+			}
+			if err != nil {
+				fields["error"] = err.Error()
+				log.WithFields(fields).Error("get retries count failed")
+			} else {
+				log.WithFields(fields).Debug("get retries count")
+			}
+		}()
+	}()
+
+	query := fmt.Sprintf("SELECT coalesce((SELECT count(*) from %sretries), 0)", svc.conf.db.TablePrefix)
+	rows, err := svc.dbConn.Query(query)
+	if err != nil {
+		DBErrors.Inc()
+
+		err = fmt.Errorf("db.Query: %s, query: %s", err.Error(), query)
+		return 0, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		if err = rows.Scan(
+			&count,
+		); err != nil {
+			DBErrors.Inc()
+
+			err = fmt.Errorf("rows.Scan: %s", err.Error())
+			return
+		}
+	}
+	if rows.Err() != nil {
+		DBErrors.Inc()
+
+		err = fmt.Errorf("rows.Err: %s", err.Error())
+		return
+	}
+
+	return
+}
+
+func getExpiredRetriesCount() (count float64, err error) {
+	begin := time.Now()
+	defer func() {
+		defer func() {
+			fields := log.Fields{
+				"took": time.Since(begin),
+			}
+			if err != nil {
+				fields["error"] = err.Error()
+				log.WithFields(fields).Error("get expired retries count failed")
+			} else {
+				log.WithFields(fields).Debug("get expired retries count")
+			}
+		}()
+	}()
+
+	query := fmt.Sprintf("SELECT coalesce((SELECT count(*) from %sretries_expired), 0)", svc.conf.db.TablePrefix)
+	rows, err := svc.dbConn.Query(query)
+	if err != nil {
+		DBErrors.Inc()
+
+		err = fmt.Errorf("db.Query: %s, query: %s", err.Error(), query)
+		return 0, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		if err = rows.Scan(
+			&count,
+		); err != nil {
+			DBErrors.Inc()
+
+			err = fmt.Errorf("rows.Scan: %s", err.Error())
+			return
+		}
+	}
+	if rows.Err() != nil {
+		DBErrors.Inc()
+
+		err = fmt.Errorf("rows.Err: %s", err.Error())
+		return
+	}
 	return
 }

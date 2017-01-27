@@ -101,6 +101,7 @@ func (j *jobs) planned() {
 		}
 	}
 }
+
 func (j *jobs) start(c *gin.Context) { // start?id=132123
 	idStr, ok := c.GetQuery("id")
 	if !ok {
@@ -145,7 +146,7 @@ func (j *jobs) stop(c *gin.Context) {
 		})
 		return
 	}
-	if err := j.stopJob(id, "cancelled"); err != nil {
+	if err := j.stopJob(id, "canceled"); err != nil {
 		err = fmt.Errorf("strconv.ParseInt: :%s", err.Error())
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error": err.Error(),
@@ -235,6 +236,7 @@ func (j *Job) run(resume bool) {
 				if err != nil {
 					err = fmt.Errorf("svc.jobs.getExpiredList: %s", err.Error())
 					svc.jobs.running[j.Id].finished = true
+					svc.jobs.running[j.Id].Status = "error"
 					log.WithFields(log.Fields{
 						"error":    err.Error(),
 						"finished": svc.jobs.running[j.Id].finished,
@@ -244,6 +246,7 @@ func (j *Job) run(resume bool) {
 				for idx, r := range expired {
 					if j.StopRequested || svc.exiting {
 						svc.jobs.running[j.Id].finished = true
+						svc.jobs.running[j.Id].Status = "canceled"
 						log.WithFields(log.Fields{
 							"jobStop":  j.StopRequested,
 							"service":  svc.exiting,
@@ -273,6 +276,7 @@ func (j *Job) run(resume bool) {
 					}
 				}
 				svc.jobs.running[j.Id].finished = true
+				svc.jobs.running[j.Id].Status = "done"
 				log.WithFields(log.Fields{
 					"id":       j.Id,
 					"count":    len(expired),
@@ -292,6 +296,7 @@ func (j *Job) run(resume bool) {
 							"service": svc.exiting,
 						}).Info("exiting")
 						svc.jobs.running[j.Id].finished = true
+						svc.jobs.running[j.Id].Status = "canceled"
 						return
 					}
 					orig, msisdn, err := j.nextMsisdn()
@@ -310,6 +315,7 @@ func (j *Job) run(resume bool) {
 					if msisdn == "" && err == nil {
 						log.WithFields(log.Fields{"count": i}).Info("done")
 						svc.jobs.running[j.Id].finished = true
+						svc.jobs.running[j.Id].Status = "done"
 						return
 					}
 					r := rec.Record{
@@ -326,7 +332,6 @@ func (j *Job) run(resume bool) {
 					j.Skip = i
 				send:
 					if err := j.sendToMobilinkRequests(0, r); err != nil {
-
 						log.WithFields(log.Fields{
 							"error": err.Error(),
 							"id":    r.RetryId,
@@ -415,7 +420,11 @@ func (j *jobs) stopJobs() {
 	for range time.Tick(time.Second) {
 		for k, _ := range j.running {
 			if j.running[k].finished {
-				if err := j.stopJob(k, "done"); err != nil {
+				status := "done"
+				if svc.jobs.running[k].Status != "" {
+					status = svc.jobs.running[k].Status
+				}
+				if err := j.stopJob(k, status); err != nil {
 					log.WithFields(log.Fields{
 						"id":    k,
 						"error": err.Error(),
@@ -557,13 +566,28 @@ func (j *jobs) setStatus(id int64, status string) (err error) {
 		return
 	}
 
+	if svc.jobs.conf.CallBackUrl != "" {
+		url := fmt.Sprintf("%s?id=%d&status=%s", svc.jobs.conf.CallBackUrl, id, status)
+		resp, err := http.Get(svc.jobs.conf.CallBackUrl)
+		fields := log.Fields{}
+		fields["url"] = url
+		if err != nil {
+			fields["error"] = err.Error()
+		}
+		if resp != nil {
+			fields["code"] = resp.Status
+		}
+		log.WithFields(fields).Info("hook call")
+	}
 	return
 }
 func (j *jobs) setSkip(skip int64, id int64) (err error) {
-	query := fmt.Sprintf("UPDATE %sjobs SET skip = $1 WHERE id = $2 ",
+
+	query := fmt.Sprintf("UPDATE %sjobs SET skip = $1, finish_at =$2 WHERE id = $3",
 		svc.conf.db.TablePrefix,
 	)
-	_, err = svc.dbConn.Exec(query, skip, id)
+	finishAt := time.Now().UTC()
+	_, err = svc.dbConn.Exec(query, skip, finishAt, id)
 	if err != nil {
 		DBErrors.Inc()
 		err = fmt.Errorf("db.Exec: %s, query: %s", err.Error(), query)

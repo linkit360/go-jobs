@@ -31,6 +31,7 @@ type JobsConfig struct {
 	PlannedEnabled bool   `yaml:"planned_enabled" default:"false"`
 	InjectionsPath string `yaml:"injections_path" default:"/var/www/xmp.linkit360.ru/web/injections"`
 	CheckPrefix    string `yaml:"prefix" default:"92"` // todo: move in settings or in db smth
+	CallBackUrl    string `yaml:"callback_url"`
 }
 
 func LoadConfig() AppConfig {
