@@ -46,14 +46,15 @@ type Job struct {
 	finished      bool           `json:"finished"`
 }
 type Params struct {
-	DateFrom   string `json:"date_from,omitempty"`
-	DateTo     string `json:"date_to,omitempty"`
-	Count      int64  `json:"count,omitempty"`
-	Order      string `json:"order,omitempty"`
-	Never      int    `json:"never,omitempty"`
-	ServiceId  int64  `json:"service_id,omitempty"`
-	CampaignId int64  `json:"campaign_id,omitempty"`
-	DryRun     bool   `json:"dry_run,omitempty"`
+	DateFrom     string `json:"date_from,omitempty"`
+	DateTo       string `json:"date_to,omitempty"`
+	Count        int64  `json:"count,omitempty"`
+	Order        string `json:"order,omitempty"`
+	Never        int    `json:"never,omitempty"`
+	ServiceId    int64  `json:"service_id,omitempty"`
+	CampaignId   int64  `json:"campaign_id,omitempty"`
+	DryRun       bool   `json:"dry_run,omitempty"`
+	LastChargeAt string `json:"last_charge_at"`
 }
 
 func (p Params) ToString() string {
@@ -389,6 +390,15 @@ func (j *Job) nextMsisdn() (orig, msisdn string, err error) {
 		err = fmt.Errorf("Wrong prefix: %s", msisdn)
 		return
 	}
+	if j.ParsedParams.LastChargeAt != "" {
+		// todo:
+		// query:
+		//	" SELECT 1 "+
+		//	" FROM %stransactions "+
+		//	" WHERE ( result = 'paid' OR result = 'retry_paid') AND sent_at > $1" AND msisdn = $2)
+		//dbConn.QueryRow(query, msisdn, j.ParsedParams.LastChargeAt).Scan(&r.SubscriptionId
+		//skip id found
+	}
 	return
 }
 func (j *Job) closeJob() error {
@@ -621,32 +631,38 @@ func (j *jobs) getExpiredList(p Params) (expired []rec.Record, err error) {
 	wheres := []string{}
 	if p.DateFrom != "" {
 		args = append(args, p.DateFrom)
-		wheres = append(wheres, "created_at > ")
+		wheres = append(wheres, "created_at > %s")
 	}
 	if p.DateTo != "" {
 		args = append(args, p.DateTo)
-		wheres = append(wheres, "created_at < ")
+		wheres = append(wheres, "created_at < %s")
 	}
 
 	if p.ServiceId > 0 {
 		args = append(args, p.ServiceId)
-		wheres = append(wheres, "id_service = ")
+		wheres = append(wheres, "id_service = %s")
 	}
 
 	if p.CampaignId > 0 {
 		args = append(args, p.CampaignId)
-		wheres = append(wheres, "id_campaign = ")
+		wheres = append(wheres, "id_campaign = %s")
 	}
+
 	if p.Never > 0 {
-		notPaidInDays := fmt.Sprintf("msisdn NOT IN ("+
+		args = append(args, p.DateFrom)
+		wheres = append(wheres, "msisdn NOT IN ("+
 			" SELECT DISTINCT msisdn "+
 			" FROM %stransactions "+
-			" WHERE sent_at > (CURRENT_TIMESTAMP -  INTERVAL '%d days' ) AND "+
-			"       ( result = 'paid' OR result = 'retry_paid') )",
-			svc.conf.db.TablePrefix,
-			p.Never,
+			" WHERE ( result = 'paid' OR result = 'retry_paid')",
 		)
-		wheres = append(wheres, notPaidInDays)
+	}
+
+	if p.LastChargeAt != "" {
+		args = append(args, p.LastChargeAt)
+		wheres = append(wheres, "msisdn NOT IN ("+
+			" SELECT DISTINCT msisdn "+
+			" FROM %stransactions "+
+			" WHERE ( result = 'paid' OR result = 'retry_paid') AND sent_at > %s")
 	}
 
 	countWhere := ""
@@ -656,8 +672,9 @@ func (j *jobs) getExpiredList(p Params) (expired []rec.Record, err error) {
 
 	whereClauses := []string{}
 	for k, v := range wheres {
-		whereClauses = append(whereClauses, v+"$"+strconv.Itoa(k+1))
+		whereClauses = append(whereClauses, fmt.Sprintf(v, "$"+strconv.Itoa(k+1)))
 	}
+
 	where := strings.Join(whereClauses, " AND ")
 	if where != "" {
 		where = "WHERE " + where
