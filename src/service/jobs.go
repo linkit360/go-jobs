@@ -55,7 +55,7 @@ type Params struct {
 	ServiceId    int64  `json:"service_id,omitempty"`
 	CampaignId   int64  `json:"campaign_id,omitempty"`
 	DryRun       bool   `json:"dry_run,omitempty"`
-	LastChargeAt string `json:"last_charge_at"`
+	LastChargeAt string `json:"last_charge_at,omitempty"`
 }
 
 func (p Params) ToString() string {
@@ -682,20 +682,22 @@ func (j *jobs) getExpiredList(p Params) (expired []rec.Record, err error) {
 	}
 
 	if p.Never > 0 {
-		args = append(args, p.DateFrom)
-		wheres = append(wheres, "msisdn NOT IN ("+
+		wheres = append(wheres, fmt.Sprintf("msisdn NOT IN ("+
 			" SELECT DISTINCT msisdn "+
 			" FROM %stransactions "+
-			" WHERE ( result = 'paid' OR result = 'retry_paid')",
+			" WHERE ( result = 'paid' OR result = 'retry_paid') )",
+			svc.conf.db.TablePrefix),
 		)
 	}
 
 	if p.LastChargeAt != "" {
 		args = append(args, p.LastChargeAt)
-		wheres = append(wheres, "msisdn NOT IN ("+
+		wheres = append(wheres, fmt.Sprintf("msisdn NOT IN ("+
 			" SELECT DISTINCT msisdn "+
-			" FROM %stransactions "+
-			" WHERE ( result = 'paid' OR result = 'retry_paid') AND sent_at > %s")
+			" FROM %stransactions ", svc.conf.db.TablePrefix)+
+			" WHERE ( result = 'paid' OR result = 'retry_paid') AND "+
+			"sent_at > %s ) ",
+		)
 	}
 
 	countWhere := ""
@@ -705,7 +707,11 @@ func (j *jobs) getExpiredList(p Params) (expired []rec.Record, err error) {
 
 	whereClauses := []string{}
 	for k, v := range wheres {
-		whereClauses = append(whereClauses, fmt.Sprintf(v, "$"+strconv.Itoa(k+1)))
+		if strings.Contains(v, "%s") {
+			whereClauses = append(whereClauses, fmt.Sprintf(v, "$"+strconv.Itoa(k+1)))
+		} else {
+			whereClauses = append(whereClauses, v)
+		}
 	}
 
 	where := strings.Join(whereClauses, " AND ")
@@ -749,7 +755,7 @@ func (j *jobs) getExpiredList(p Params) (expired []rec.Record, err error) {
 	rows, err = svc.dbConn.Query(query, args...)
 	if err != nil {
 		DBErrors.Inc()
-		err = fmt.Errorf("db.Query: %s, query: %s", err.Error(), query)
+		err = fmt.Errorf("db.Query: %s, query: %s, args: %s, params: %s", err.Error(), query, fmt.Sprintf("%#v", args), fmt.Sprintf("%#v", p))
 		return
 	}
 	defer rows.Close()
