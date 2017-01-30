@@ -37,6 +37,7 @@ func InitService(
 	jobsConfig config.JobsConfig,
 	inMemConfig inmem_client.RPCClientConfig,
 	dbConf db.DataBaseConfig,
+	dbSlaveConf db.DataBaseConfig,
 	notifierConfig amqp.NotifierConfig,
 ) {
 	log.SetLevel(log.DebugLevel)
@@ -44,7 +45,7 @@ func InitService(
 	svc.dbConn = db.Init(dbConf)
 	svc.publisher = amqp.NewNotifier(notifierConfig)
 	svc.suspendedSubscriptions = &suspendedSubscriptions{}
-	svc.jobs = initJobs(jobsConfig)
+	svc.jobs = initJobs(jobsConfig, dbSlaveConf)
 
 	svc.conf = Config{
 		server:    serverConfig,

@@ -18,6 +18,7 @@ import (
 
 	"github.com/vostrok/jobs/src/config"
 	"github.com/vostrok/utils/amqp"
+	"github.com/vostrok/utils/db"
 	"github.com/vostrok/utils/rec"
 )
 
@@ -27,6 +28,7 @@ func init() {
 
 type jobs struct {
 	running map[int64]*Job
+	slave   *sql.DB
 	conf    config.JobsConfig
 }
 
@@ -63,13 +65,18 @@ func (p Params) ToString() string {
 	return string(s)
 }
 
-func initJobs(jConf config.JobsConfig) *jobs {
+func initJobs(jConf config.JobsConfig, dbSlaveConf db.DataBaseConfig) *jobs {
 	jobs := &jobs{
 		running: make(map[int64]*Job),
 		conf:    jConf,
+		slave:   db.Init(dbSlaveConf),
 	}
 	if jConf.PlannedEnabled {
 		go jobs.planned()
+	} else {
+		log.WithFields(log.Fields{
+			"planned": jConf.PlannedEnabled,
+		}).Info("run planned disabled")
 	}
 
 	go jobs.stopJobs()
@@ -227,8 +234,7 @@ func (j *jobs) startJob(id int64, resume bool) error {
 
 func (j *Job) run(resume bool) {
 	log.WithFields(log.Fields{
-		"id":  j.Id,
-		"job": fmt.Sprintf("%#v", j),
+		"id": j.Id,
 	}).Info("run")
 
 	go func() {
@@ -265,6 +271,10 @@ func (j *Job) run(resume bool) {
 					} else {
 						resume = false
 					}
+					log.WithFields(log.Fields{
+						"tid": r.Tid,
+					}).Info("process")
+
 					r.Type = "expired"
 					j.Skip = r.RetryId
 					if err := j.sendToMobilinkRequests(0, r); err != nil {
@@ -402,10 +412,12 @@ func (j *Job) nextMsisdn() (orig, msisdn string, err error) {
 	}
 	if j.ParsedParams.LastChargeAt != "" {
 		var one int
-		query := " SELECT 1 FROM %stransactions " +
-			" WHERE ( result = 'paid' OR result = 'retry_paid') AND " +
-			" sent_at > $1 AND msisdn = $2 LIMIT 1"
-		if err = svc.dbConn.QueryRow(query, j.ParsedParams.LastChargeAt, msisdn).Scan(&one); err != nil {
+		query := fmt.Sprintf("SELECT 1 FROM %stransactions "+
+			" WHERE ( result = 'paid' OR result = 'retry_paid') AND "+
+			" sent_at > $1 AND msisdn = $2 LIMIT 1", svc.conf.db.TablePrefix,
+		)
+
+		if err = svc.jobs.slave.QueryRow(query, j.ParsedParams.LastChargeAt, msisdn).Scan(&one); err != nil {
 			if err == sql.ErrNoRows {
 				err = nil
 				return
@@ -418,9 +430,12 @@ func (j *Job) nextMsisdn() (orig, msisdn string, err error) {
 	}
 	if j.ParsedParams.Never > 0 {
 		var one int
-		query := " SELECT 1 FROM %stransactions " +
-			" WHERE ( result = 'paid' OR result = 'retry_paid') AND msisdn = $1 LIMIT 1"
-		if err = svc.dbConn.QueryRow(query, msisdn).Scan(&one); err != nil {
+		query := fmt.Sprintf("SELECT 1 FROM %stransactions "+
+			" WHERE ( result = 'paid' OR result = 'retry_paid') AND msisdn = $1 LIMIT 1",
+			svc.conf.db.TablePrefix,
+		)
+
+		if err = svc.jobs.slave.QueryRow(query, msisdn).Scan(&one); err != nil {
 			if err == sql.ErrNoRows {
 				err = nil
 				return
@@ -611,7 +626,7 @@ func (j *jobs) setStatus(id int64, status string) (err error) {
 
 	if svc.jobs.conf.CallBackUrl != "" {
 		url := fmt.Sprintf("%s?id=%d&status=%s", svc.jobs.conf.CallBackUrl, id, status)
-		resp, err := http.Get(svc.jobs.conf.CallBackUrl)
+		resp, err := http.Get(url)
 		fields := log.Fields{}
 		fields["url"] = url
 		if err != nil {
@@ -725,7 +740,7 @@ func (j *jobs) getExpiredList(p Params) (expired []rec.Record, err error) {
 	}
 	log.WithFields(log.Fields{
 		"args":   fmt.Sprintf("%#v", args),
-		"where":  where,
+		"where":  where + orderTypeWhere + countWhere,
 		"params": p.ToString(),
 	}).Debug("run query")
 
@@ -752,7 +767,7 @@ func (j *jobs) getExpiredList(p Params) (expired []rec.Record, err error) {
 	)
 
 	var rows *sql.Rows
-	rows, err = svc.dbConn.Query(query, args...)
+	rows, err = svc.jobs.slave.Query(query, args...)
 	if err != nil {
 		DBErrors.Inc()
 		err = fmt.Errorf("db.Query: %s, query: %s, args: %s, params: %s", err.Error(), query, fmt.Sprintf("%#v", args), fmt.Sprintf("%#v", p))
@@ -782,7 +797,6 @@ func (j *jobs) getExpiredList(p Params) (expired []rec.Record, err error) {
 			err = fmt.Errorf("Rows.Next: %s", err.Error())
 			return
 		}
-
 		expired = append(expired, record)
 	}
 	if rows.Err() != nil {

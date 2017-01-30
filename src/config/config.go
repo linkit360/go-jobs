@@ -24,6 +24,7 @@ type AppConfig struct {
 	Jobs              JobsConfig                   `yaml:"jobs"`
 	InMemClientConfig inmem_client.RPCClientConfig `yaml:"inmem_client"`
 	DbConf            db.DataBaseConfig            `yaml:"db"`
+	DbSlaveConf       db.DataBaseConfig            `yaml:"db_slave"`
 	Notifier          amqp.NotifierConfig          `yaml:"publisher"`
 }
 
