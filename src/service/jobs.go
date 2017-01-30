@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -302,6 +303,12 @@ func (j *Job) run(resume bool) {
 					}
 					orig, msisdn, err := j.nextMsisdn()
 					if err != nil {
+						if err == errPaidInTransactions {
+							log.WithFields(log.Fields{
+								"msisdn": msisdn,
+							}).Warn("already paid")
+							continue
+						}
 						log.WithFields(log.Fields{
 							"orig":   orig,
 							"msisdn": msisdn,
@@ -366,6 +373,9 @@ func (j *Job) openFile() error {
 func TrimToNum(r rune) bool {
 	return !unicode.IsDigit(r)
 }
+
+var errPaidInTransactions = errors.New("Paid in transactions")
+
 func (j *Job) nextMsisdn() (orig, msisdn string, err error) {
 
 	if !j.scanner.Scan() {
@@ -391,16 +401,39 @@ func (j *Job) nextMsisdn() (orig, msisdn string, err error) {
 		return
 	}
 	if j.ParsedParams.LastChargeAt != "" {
-		// todo:
-		// query:
-		//	" SELECT 1 "+
-		//	" FROM %stransactions "+
-		//	" WHERE ( result = 'paid' OR result = 'retry_paid') AND sent_at > $1" AND msisdn = $2)
-		//dbConn.QueryRow(query, msisdn, j.ParsedParams.LastChargeAt).Scan(&r.SubscriptionId
-		//skip id found
+		var one int
+		query := " SELECT 1 FROM %stransactions " +
+			" WHERE ( result = 'paid' OR result = 'retry_paid') AND " +
+			" sent_at > $1 AND msisdn = $2 LIMIT 1"
+		if err = svc.dbConn.QueryRow(query, j.ParsedParams.LastChargeAt, msisdn).Scan(&one); err != nil {
+			if err == sql.ErrNoRows {
+				err = nil
+				return
+			} else {
+				err = fmt.Errorf("dbConn.QueryRow.Scan: %s, query %s", err.Error(), query)
+				return
+			}
+			return "", "", errPaidInTransactions
+		}
+	}
+	if j.ParsedParams.Never > 0 {
+		var one int
+		query := " SELECT 1 FROM %stransactions " +
+			" WHERE ( result = 'paid' OR result = 'retry_paid') AND msisdn = $1 LIMIT 1"
+		if err = svc.dbConn.QueryRow(query, msisdn).Scan(&one); err != nil {
+			if err == sql.ErrNoRows {
+				err = nil
+				return
+			} else {
+				err = fmt.Errorf("dbConn.QueryRow.Scan: %s, query %s", err.Error(), query)
+				return
+			}
+			return "", "", errPaidInTransactions
+		}
 	}
 	return
 }
+
 func (j *Job) closeJob() error {
 	return j.fh.Close()
 }
