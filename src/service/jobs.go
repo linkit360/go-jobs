@@ -52,6 +52,7 @@ type Params struct {
 	DateFrom     string `json:"date_from,omitempty"`
 	DateTo       string `json:"date_to,omitempty"`
 	Count        int64  `json:"count,omitempty"`
+	Offset       int64  `json:"offset,omitempty"`
 	Order        string `json:"order,omitempty"`
 	Never        int    `json:"never,omitempty"`
 	ServiceId    int64  `json:"service_id,omitempty"`
@@ -156,7 +157,7 @@ func (j *jobs) stop(c *gin.Context) {
 		return
 	}
 	if err := j.stopJob(id, "canceled"); err != nil {
-		err = fmt.Errorf("strconv.ParseInt: :%s", err.Error())
+		err = fmt.Errorf("j.stopJob: %s", err.Error())
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error": err.Error(),
 		})
@@ -275,6 +276,12 @@ func (j *Job) run(resume bool) {
 						"tid": r.Tid,
 					}).Info("process")
 
+					if j.ParsedParams.ServiceId > 0 {
+						r.ServiceId = j.ParsedParams.ServiceId
+					}
+					if j.ParsedParams.CampaignId > 0 {
+						r.CampaignId = j.ParsedParams.CampaignId
+					}
 					r.Type = "expired"
 					j.Skip = r.RetryId
 					if err := j.sendToMobilinkRequests(0, r); err != nil {
@@ -296,7 +303,70 @@ func (j *Job) run(resume bool) {
 				}).Info("done")
 				return
 			}
+			if j.Type == "cashback" {
+				expired, err := svc.jobs.getRetriesList(j.ParsedParams)
+				if err != nil {
+					err = fmt.Errorf("svc.jobs.getExpiredList: %s", err.Error())
+					svc.jobs.running[j.Id].finished = true
+					svc.jobs.running[j.Id].Status = "error"
+					log.WithFields(log.Fields{
+						"error":    err.Error(),
+						"finished": svc.jobs.running[j.Id].finished,
+					}).Error("cannt process")
+					return
+				}
+				for _, rr := range expired {
+					if j.StopRequested || svc.exiting {
+						svc.jobs.running[j.Id].finished = true
+						svc.jobs.running[j.Id].Status = "canceled"
+						log.WithFields(log.Fields{
+							"jobStop":  j.StopRequested,
+							"service":  svc.exiting,
+							"finished": svc.jobs.running[j.Id].finished,
+						}).Info("exiting")
+						return
+					}
+					log.WithFields(log.Fields{
+						"count":      rr.Count,
+						"msisdn":     rr.Msisdn,
+						"service_id": rr.r.ServiceId,
+					}).Info("push")
 
+					for i := 0; i < rr.Count; i++ {
+						if j.ParsedParams.ServiceId > 0 {
+							rr.r.ServiceId = j.ParsedParams.ServiceId
+						}
+						if j.ParsedParams.CampaignId > 0 {
+							rr.r.CampaignId = j.ParsedParams.CampaignId
+						}
+						log.WithFields(log.Fields{
+							"tid":         rr.r.Tid,
+							"idx":         i,
+							"msisdn":      rr.r.Msisdn,
+							"service_id":  rr.r.ServiceId,
+							"campaign_id": rr.r.CampaignId,
+						}).Info("process")
+						rr.r.Type = "expired"
+						j.Skip = rr.r.RetryId
+						if err := j.sendToMobilinkRequests(0, rr.r); err != nil {
+							log.WithFields(log.Fields{
+								"error": err.Error(),
+								"id":    rr.r.RetryId,
+							}).Error("cannt process")
+							time.Sleep(time.Second)
+							continue
+						}
+					}
+				}
+				svc.jobs.running[j.Id].finished = true
+				svc.jobs.running[j.Id].Status = "done"
+				log.WithFields(log.Fields{
+					"id":       j.Id,
+					"count":    len(expired),
+					"finished": svc.jobs.running[j.Id].finished,
+				}).Info("done")
+				return
+			}
 			if j.Type == "injection" {
 				defer j.closeJob()
 
@@ -831,6 +901,123 @@ func (j *jobs) getExpiredList(p Params) (expired []rec.Record, err error) {
 	}
 	return expired, nil
 }
+
+type Rrr struct {
+	r      rec.Record
+	Count  int
+	Msisdn string
+}
+
+func (j *jobs) getRetriesList(p Params) (expired []Rrr, err error) {
+	begin := time.Now()
+	var query string
+	defer func() {
+		defer func() {
+			fields := log.Fields{
+				"took":  time.Since(begin),
+				"limit": p.Count,
+				"query": query,
+			}
+			if err != nil {
+				fields["error"] = err.Error()
+				log.WithFields(fields).Error("load retries failed")
+			} else {
+				fields["count"] = len(expired)
+				log.WithFields(fields).Debug("load retries")
+			}
+		}()
+	}()
+
+	query = "select msisdn, count(msisdn) FROM xmp_transactions " +
+		"WHERE result = 'expired_paid' AND sent_at > current_date and " +
+		"id_service != 111111 and id_service != 222222 and id_service != 333333 " +
+		"group by msisdn order by count asc"
+	if p.Count > 0 {
+		query = query + fmt.Sprintf(" LIMIT %d", p.Count)
+	}
+	if p.Offset > 0 {
+		query = query + fmt.Sprintf(" OFFSET %d", p.Offset)
+	}
+	var rows *sql.Rows
+	rows, err = svc.jobs.slave.Query(query)
+	if err != nil {
+		DBErrors.Inc()
+		err = fmt.Errorf("db.Query: %s, query: %s", err.Error(), query)
+		return
+	}
+	defer rows.Close()
+	log.WithFields(log.Fields{"query": query}).Debug("run")
+
+	var rrArr []Rrr
+	for rows.Next() {
+		var rr Rrr
+		if err = rows.Scan(
+			&rr.Msisdn,
+			&rr.Count,
+		); err != nil {
+			DBErrors.Inc()
+			err = fmt.Errorf("Rows.Next: %s", err.Error())
+			return
+		}
+		rrArr = append(rrArr, rr)
+	}
+	if rows.Err() != nil {
+		DBErrors.Inc()
+		err = fmt.Errorf("rows.Err: %s", err.Error())
+		return
+	}
+
+	query = "SELECT " +
+		"msisdn, " +
+		"id, " +
+		"tid, " +
+		"created_at, " +
+		"last_pay_attempt_at, " +
+		"attempts_count, " +
+		"keep_days, " +
+		"delay_hours, " +
+		"price, " +
+		"operator_code, " +
+		"country_code, " +
+		"id_service, " +
+		"id_subscription, " +
+		"id_campaign " +
+		"FROM xmp_retries_expired " +
+		"WHERE msisdn = $1 LIMIT 1"
+
+	for _, val := range rrArr {
+		record := rec.Record{}
+		if err = svc.jobs.slave.QueryRow(query, val.Msisdn).Scan(
+			&record.Msisdn,
+			&record.RetryId,
+			&record.Tid,
+			&record.CreatedAt,
+			&record.LastPayAttemptAt,
+			&record.AttemptsCount,
+			&record.KeepDays,
+			&record.DelayHours,
+			&record.Price,
+			&record.OperatorCode,
+			&record.CountryCode,
+			&record.ServiceId,
+			&record.SubscriptionId,
+			&record.CampaignId,
+		); err != nil {
+			DBErrors.Inc()
+			err = fmt.Errorf("Rows.Next: %s", err.Error())
+			return
+		}
+		val.r = record
+		expired = append(expired, val)
+	}
+	if rows.Err() != nil {
+		DBErrors.Inc()
+		err = fmt.Errorf("rows.Err: %s", err.Error())
+		return
+	}
+	return expired, nil
+}
+
 func (j *Job) sendToMobilinkRequests(priority uint8, r rec.Record) (err error) {
 	if j.ParsedParams.DryRun {
 		return nil
