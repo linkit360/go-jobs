@@ -326,9 +326,11 @@ func (j *Job) run(resume bool) {
 						}).Error("skip")
 						continue
 					}
-					if i < j.Skip {
+					if resume && i < j.Skip {
 						i++
 						continue
+					} else {
+						resume = false
 					}
 					if msisdn == "" && err == nil {
 						log.WithFields(log.Fields{"count": i}).Info("done")
@@ -345,7 +347,7 @@ func (j *Job) run(resume bool) {
 					log.WithFields(log.Fields{
 						"tid":    r.Tid,
 						"msisdn": r.Msisdn,
-					}).Info("ok")
+					}).Info("process")
 					r.Type = "injection"
 					j.Skip = i
 				send:
@@ -377,6 +379,10 @@ func (j *Job) openFile() error {
 		return fmt.Errorf("os.Open: %s, path: %s", err.Error(), path)
 
 	}
+	log.WithFields(log.Fields{
+		"id":   j.Id,
+		"path": path,
+	}).Info("opened")
 	j.scanner = bufio.NewScanner(j.fh)
 	return nil
 }
@@ -397,6 +403,10 @@ func (j *Job) nextMsisdn() (orig, msisdn string, err error) {
 		return "", "", nil
 	}
 	orig = j.scanner.Text()
+	log.WithFields(log.Fields{
+		"original": orig,
+	}).Info("got from file")
+
 	msisdn = strings.TrimFunc(orig, TrimToNum)
 	if len(msisdn) > 20 {
 		err = fmt.Errorf("Too long msisdn, length: %d", len(msisdn))
@@ -412,6 +422,10 @@ func (j *Job) nextMsisdn() (orig, msisdn string, err error) {
 	}
 	if j.ParsedParams.LastChargeAt != "" {
 		var one int
+		log.WithFields(log.Fields{
+			"last_charge_at": j.ParsedParams.LastChargeAt,
+			"msisdn":         msisdn,
+		}).Info("check")
 		query := fmt.Sprintf("SELECT 1 FROM %stransactions "+
 			" WHERE ( result = 'paid' OR result = 'retry_paid') AND "+
 			" sent_at > $1 AND msisdn = $2 LIMIT 1", svc.conf.db.TablePrefix,
@@ -420,6 +434,10 @@ func (j *Job) nextMsisdn() (orig, msisdn string, err error) {
 		if err = svc.jobs.slave.QueryRow(query, j.ParsedParams.LastChargeAt, msisdn).Scan(&one); err != nil {
 			if err == sql.ErrNoRows {
 				err = nil
+				log.WithFields(log.Fields{
+					"last_charge_at": j.ParsedParams.LastChargeAt,
+					"msisdn":         msisdn,
+				}).Info("passed")
 				return
 			} else {
 				err = fmt.Errorf("dbConn.QueryRow.Scan: %s, query %s", err.Error(), query)
@@ -430,6 +448,9 @@ func (j *Job) nextMsisdn() (orig, msisdn string, err error) {
 	}
 	if j.ParsedParams.Never > 0 {
 		var one int
+		log.WithFields(log.Fields{
+			"msisdn": msisdn,
+		}).Info("never?")
 		query := fmt.Sprintf("SELECT 1 FROM %stransactions "+
 			" WHERE ( result = 'paid' OR result = 'retry_paid') AND msisdn = $1 LIMIT 1",
 			svc.conf.db.TablePrefix,
@@ -438,6 +459,10 @@ func (j *Job) nextMsisdn() (orig, msisdn string, err error) {
 		if err = svc.jobs.slave.QueryRow(query, msisdn).Scan(&one); err != nil {
 			if err == sql.ErrNoRows {
 				err = nil
+				log.WithFields(log.Fields{
+					"never":  j.ParsedParams.Never,
+					"msisdn": msisdn,
+				}).Info("passed")
 				return
 			} else {
 				err = fmt.Errorf("dbConn.QueryRow.Scan: %s, query %s", err.Error(), query)
