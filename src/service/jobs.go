@@ -30,6 +30,7 @@ type jobs struct {
 	running map[int64]*Job
 	slave   *sql.DB
 	conf    config.JobsConfig
+	cache   map[int64]map[string]struct{}
 }
 
 type Job struct {
@@ -69,6 +70,7 @@ func (p Params) ToString() string {
 func initJobs(jConf config.JobsConfig, dbSlaveConf db.DataBaseConfig) *jobs {
 	jobs := &jobs{
 		running: make(map[int64]*Job),
+		cache:   make(map[int64]map[string]struct{}),
 		conf:    jConf,
 		slave:   db.Init(dbSlaveConf),
 	}
@@ -209,7 +211,9 @@ func (j *jobs) startJob(id int64, resume bool) error {
 		return err
 	}
 
+	svc.jobs.cache[id] = make(map[string]struct{})
 	svc.jobs.running[id] = &job
+
 	if job.Type == "injection" {
 		if err := svc.jobs.running[id].openFile(); err != nil {
 			if err := svc.jobs.setStatus(id, "error"); err != nil {
@@ -282,6 +286,16 @@ func (j *Job) run(resume bool) {
 					if j.ParsedParams.CampaignId > 0 {
 						r.CampaignId = j.ParsedParams.CampaignId
 					}
+
+					if _, ok := svc.jobs.cache[j.Id][r.Msisdn]; ok {
+						log.WithFields(log.Fields{
+							"tid": r.Tid,
+						}).Info("duplicate")
+						continue
+					} else {
+						svc.jobs.cache[j.Id][r.Msisdn] = struct{}{}
+					}
+
 					r.Type = "expired"
 					j.Skip = r.RetryId
 					if err := j.sendToMobilinkRequests(0, r); err != nil {
@@ -292,70 +306,6 @@ func (j *Job) run(resume bool) {
 						time.Sleep(time.Second)
 						idx = idx - 1
 						continue
-					}
-				}
-				svc.jobs.running[j.Id].finished = true
-				svc.jobs.running[j.Id].Status = "done"
-				log.WithFields(log.Fields{
-					"id":       j.Id,
-					"count":    len(expired),
-					"finished": svc.jobs.running[j.Id].finished,
-				}).Info("done")
-				return
-			}
-			if j.Type == "cashback" {
-				expired, err := svc.jobs.getRetriesList(j.ParsedParams)
-				if err != nil {
-					err = fmt.Errorf("svc.jobs.getExpiredList: %s", err.Error())
-					svc.jobs.running[j.Id].finished = true
-					svc.jobs.running[j.Id].Status = "error"
-					log.WithFields(log.Fields{
-						"error":    err.Error(),
-						"finished": svc.jobs.running[j.Id].finished,
-					}).Error("cannt process")
-					return
-				}
-				for _, rr := range expired {
-					if j.StopRequested || svc.exiting {
-						svc.jobs.running[j.Id].finished = true
-						svc.jobs.running[j.Id].Status = "canceled"
-						log.WithFields(log.Fields{
-							"jobStop":  j.StopRequested,
-							"service":  svc.exiting,
-							"finished": svc.jobs.running[j.Id].finished,
-						}).Info("exiting")
-						return
-					}
-					log.WithFields(log.Fields{
-						"count":      rr.Count,
-						"msisdn":     rr.Msisdn,
-						"service_id": rr.r.ServiceId,
-					}).Info("push")
-
-					for i := 0; i < rr.Count; i++ {
-						if j.ParsedParams.ServiceId > 0 {
-							rr.r.ServiceId = j.ParsedParams.ServiceId
-						}
-						if j.ParsedParams.CampaignId > 0 {
-							rr.r.CampaignId = j.ParsedParams.CampaignId
-						}
-						log.WithFields(log.Fields{
-							"tid":         rr.r.Tid,
-							"idx":         i,
-							"msisdn":      rr.r.Msisdn,
-							"service_id":  rr.r.ServiceId,
-							"campaign_id": rr.r.CampaignId,
-						}).Info("process")
-						rr.r.Type = "expired"
-						j.Skip = rr.r.RetryId
-						if err := j.sendToMobilinkRequests(0, rr.r); err != nil {
-							log.WithFields(log.Fields{
-								"error": err.Error(),
-								"id":    rr.r.RetryId,
-							}).Error("cannt process")
-							time.Sleep(time.Second)
-							continue
-						}
 					}
 				}
 				svc.jobs.running[j.Id].finished = true
@@ -402,6 +352,16 @@ func (j *Job) run(resume bool) {
 					} else {
 						resume = false
 					}
+
+					if _, ok := svc.jobs.cache[j.Id][msisdn]; ok {
+						log.WithFields(log.Fields{
+							"msisdn": msisdn,
+						}).Info("duplicate")
+						continue
+					} else {
+						svc.jobs.cache[j.Id][msisdn] = struct{}{}
+					}
+
 					if msisdn == "" && err == nil {
 						log.WithFields(log.Fields{"count": i}).Info("done")
 						svc.jobs.running[j.Id].finished = true
@@ -563,6 +523,8 @@ func (j *jobs) stopJob(id int64, status string) error {
 	if err := j.setSkip(svc.jobs.running[id].Skip, id); err != nil {
 		return fmt.Errorf("j.setSkip: %s", err.Error())
 	}
+
+	delete(svc.jobs.cache, id)
 	delete(svc.jobs.running, id)
 	log.WithFields(log.Fields{
 		"id": id,
@@ -829,9 +791,9 @@ func (j *jobs) getExpiredList(p Params) (expired []rec.Record, err error) {
 		where = "WHERE " + where
 	}
 
-	orderTypeWhere := " ORDER BY id ASC "
+	orderTypeWhere := " ORDER BY msisdn, id ASC "
 	if p.Order != "" {
-		orderTypeWhere = " ORDER BY id " + p.Order
+		orderTypeWhere = " ORDER BY msisdn, id " + p.Order
 	}
 	log.WithFields(log.Fields{
 		"args":   fmt.Sprintf("%#v", args),
@@ -840,7 +802,7 @@ func (j *jobs) getExpiredList(p Params) (expired []rec.Record, err error) {
 	}).Debug("run query")
 
 	query = fmt.Sprintf("SELECT "+
-		"msisdn, "+
+		"DISTINCT ON (msisdn), "+
 		"id, "+
 		"tid, "+
 		"created_at, "+
@@ -896,7 +858,7 @@ func (j *jobs) getExpiredList(p Params) (expired []rec.Record, err error) {
 	}
 	if rows.Err() != nil {
 		DBErrors.Inc()
-		err = fmt.Errorf("GetRetries RowsError: %s", err.Error())
+		err = fmt.Errorf("rows.Error: %s", err.Error())
 		return
 	}
 	return expired, nil
@@ -906,116 +868,6 @@ type Rrr struct {
 	r      rec.Record
 	Count  int
 	Msisdn string
-}
-
-func (j *jobs) getRetriesList(p Params) (expired []Rrr, err error) {
-	begin := time.Now()
-	var query string
-	defer func() {
-		defer func() {
-			fields := log.Fields{
-				"took":  time.Since(begin),
-				"limit": p.Count,
-				"query": query,
-			}
-			if err != nil {
-				fields["error"] = err.Error()
-				log.WithFields(fields).Error("load retries failed")
-			} else {
-				fields["count"] = len(expired)
-				log.WithFields(fields).Debug("load retries")
-			}
-		}()
-	}()
-
-	query = "select msisdn, count(msisdn) FROM xmp_transactions " +
-		"WHERE result = 'expired_paid' AND sent_at > current_date and " +
-		"id_service != 111111 and id_service != 222222 and id_service != 333333 " +
-		"group by msisdn order by count asc"
-	if p.Count > 0 {
-		query = query + fmt.Sprintf(" LIMIT %d", p.Count)
-	}
-	if p.Offset > 0 {
-		query = query + fmt.Sprintf(" OFFSET %d", p.Offset)
-	}
-	var rows *sql.Rows
-	rows, err = svc.jobs.slave.Query(query)
-	if err != nil {
-		DBErrors.Inc()
-		err = fmt.Errorf("db.Query: %s, query: %s", err.Error(), query)
-		return
-	}
-	defer rows.Close()
-	log.WithFields(log.Fields{"query": query}).Debug("run")
-
-	var rrArr []Rrr
-	for rows.Next() {
-		var rr Rrr
-		if err = rows.Scan(
-			&rr.Msisdn,
-			&rr.Count,
-		); err != nil {
-			DBErrors.Inc()
-			err = fmt.Errorf("Rows.Next: %s", err.Error())
-			return
-		}
-		rrArr = append(rrArr, rr)
-	}
-	if rows.Err() != nil {
-		DBErrors.Inc()
-		err = fmt.Errorf("rows.Err: %s", err.Error())
-		return
-	}
-
-	query = "SELECT " +
-		"msisdn, " +
-		"id, " +
-		"tid, " +
-		"created_at, " +
-		"last_pay_attempt_at, " +
-		"attempts_count, " +
-		"keep_days, " +
-		"delay_hours, " +
-		"price, " +
-		"operator_code, " +
-		"country_code, " +
-		"id_service, " +
-		"id_subscription, " +
-		"id_campaign " +
-		"FROM xmp_retries_expired " +
-		"WHERE msisdn = $1 LIMIT 1"
-
-	for _, val := range rrArr {
-		record := rec.Record{}
-		if err = svc.jobs.slave.QueryRow(query, val.Msisdn).Scan(
-			&record.Msisdn,
-			&record.RetryId,
-			&record.Tid,
-			&record.CreatedAt,
-			&record.LastPayAttemptAt,
-			&record.AttemptsCount,
-			&record.KeepDays,
-			&record.DelayHours,
-			&record.Price,
-			&record.OperatorCode,
-			&record.CountryCode,
-			&record.ServiceId,
-			&record.SubscriptionId,
-			&record.CampaignId,
-		); err != nil {
-			DBErrors.Inc()
-			err = fmt.Errorf("Rows.Next: %s", err.Error())
-			return
-		}
-		val.r = record
-		expired = append(expired, val)
-	}
-	if rows.Err() != nil {
-		DBErrors.Inc()
-		err = fmt.Errorf("rows.Err: %s", err.Error())
-		return
-	}
-	return expired, nil
 }
 
 func (j *Job) sendToMobilinkRequests(priority uint8, r rec.Record) (err error) {
