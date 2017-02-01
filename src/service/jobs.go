@@ -340,6 +340,12 @@ func (j *Job) run(resume bool) {
 
 				var i int64
 				for {
+					if j.ParsedParams.Count > 0 && i > j.ParsedParams.Count {
+						svc.jobs.running[j.Id].finished = true
+						svc.jobs.running[j.Id].Status = "done"
+						return
+					}
+
 					i++
 					if j.StopRequested || svc.exiting {
 						log.WithFields(log.Fields{
@@ -348,6 +354,7 @@ func (j *Job) run(resume bool) {
 						}).Info("exiting")
 						svc.jobs.running[j.Id].finished = true
 						svc.jobs.running[j.Id].Status = "canceled"
+
 						return
 					}
 					j.processInjection(i, &resume)
@@ -416,6 +423,7 @@ func (j *Job) processInjection(i int64, resume *bool) {
 	}).Info("process")
 
 	r.Type = "injection"
+
 	j.Skip = i
 
 send:
@@ -941,10 +949,11 @@ func (j *Job) logMsisdn(idx int64, msisdn, action string, err error) {
 	}
 
 	fields := log.Fields{
-		"msisdn": msisdn,
+		"action": action,
+		"id":     idx,
 	}
 	if err != nil {
 		fields["error"] = err.Error()
 	}
-	j.log.WithFields(fields).Println(idx)
+	j.log.WithFields(fields).Println(msisdn)
 }
