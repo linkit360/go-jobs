@@ -6,6 +6,7 @@ server:
 jobs:
   planned_enabled: false
   injections_path: /var/www/xmp.linkit360.ru/web/injections
+  log_path: /var/log/linkit/
   check_prefix: 92
   callback_url: http://dev.pk.linkit360.ru/test
 

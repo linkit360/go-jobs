@@ -19,6 +19,7 @@ import (
 	"github.com/vostrok/jobs/src/config"
 	"github.com/vostrok/utils/amqp"
 	"github.com/vostrok/utils/db"
+	logger "github.com/vostrok/utils/log"
 	"github.com/vostrok/utils/rec"
 )
 
@@ -47,6 +48,7 @@ type Job struct {
 	ParsedParams  Params         `json:"parsed_params,omitempty"`
 	fh            *os.File       `json:"-"`
 	scanner       *bufio.Scanner `json:"-"`
+	log           *log.Logger    `json:"-"`
 	finished      bool           `json:"finished"`
 }
 type Params struct {
@@ -211,6 +213,17 @@ func (j *jobs) startJob(id int64, resume bool) error {
 		return err
 	}
 
+	path := svc.jobs.conf.LogPath + "jobs_" + strconv.FormatInt(time.Now().Unix(), 10) + ".log"
+	job.log = logger.GetFileLogger(path)
+	if err := svc.jobs.setLog(id, path); err != nil {
+		err = fmt.Errorf("jobs.setLog: %s", err.Error())
+		log.WithFields(log.Fields{
+			"id":    id,
+			"error": err.Error(),
+		}).Info("failed")
+		return err
+	}
+
 	svc.jobs.cache[id] = make(map[string]struct{})
 	svc.jobs.running[id] = &job
 
@@ -256,7 +269,7 @@ func (j *Job) run(resume bool) {
 					}).Error("cannt process")
 					return
 				}
-				for idx, r := range expired {
+				for _, r := range expired {
 					if j.StopRequested || svc.exiting {
 						svc.jobs.running[j.Id].finished = true
 						svc.jobs.running[j.Id].Status = "canceled"
@@ -272,6 +285,7 @@ func (j *Job) run(resume bool) {
 							"tid": r.Tid,
 							"id":  r.RetryId,
 						}).Info("skip")
+						j.logMsisdn(r.RetryId, r.Msisdn, "skip", nil)
 						continue
 					} else {
 						resume = false
@@ -291,6 +305,8 @@ func (j *Job) run(resume bool) {
 						log.WithFields(log.Fields{
 							"tid": r.Tid,
 						}).Info("duplicate")
+
+						j.logMsisdn(r.RetryId, r.Msisdn, "duplicate skip", nil)
 						continue
 					} else {
 						svc.jobs.cache[j.Id][r.Msisdn] = struct{}{}
@@ -298,15 +314,17 @@ func (j *Job) run(resume bool) {
 
 					r.Type = "expired"
 					j.Skip = r.RetryId
+
+				send:
 					if err := j.sendToMobilinkRequests(0, r); err != nil {
 						log.WithFields(log.Fields{
 							"error": err.Error(),
 							"id":    r.RetryId,
 						}).Error("cannt process")
 						time.Sleep(time.Second)
-						idx = idx - 1
-						continue
+						goto send
 					}
+					j.logMsisdn(r.RetryId, r.Msisdn, "sent", nil)
 				}
 				svc.jobs.running[j.Id].finished = true
 				svc.jobs.running[j.Id].Status = "done"
@@ -322,6 +340,7 @@ func (j *Job) run(resume bool) {
 
 				var i int64
 				for {
+					i++
 					if j.StopRequested || svc.exiting {
 						log.WithFields(log.Fields{
 							"jobStop": j.StopRequested,
@@ -331,71 +350,84 @@ func (j *Job) run(resume bool) {
 						svc.jobs.running[j.Id].Status = "canceled"
 						return
 					}
-					orig, msisdn, err := j.nextMsisdn()
-					if err != nil {
-						if err == errPaidInTransactions {
-							log.WithFields(log.Fields{
-								"msisdn": msisdn,
-							}).Warn("already paid")
-							continue
-						}
-						log.WithFields(log.Fields{
-							"orig":   orig,
-							"msisdn": msisdn,
-							"error":  err.Error(),
-						}).Error("skip")
-						continue
-					}
-					if resume && i < j.Skip {
-						i++
-						continue
-					} else {
-						resume = false
-					}
-
-					if _, ok := svc.jobs.cache[j.Id][msisdn]; ok {
-						log.WithFields(log.Fields{
-							"msisdn": msisdn,
-						}).Info("duplicate")
-						continue
-					} else {
-						svc.jobs.cache[j.Id][msisdn] = struct{}{}
-					}
-
-					if msisdn == "" && err == nil {
-						log.WithFields(log.Fields{"count": i}).Info("done")
-						svc.jobs.running[j.Id].finished = true
-						svc.jobs.running[j.Id].Status = "done"
-						return
-					}
-					r := rec.Record{
-						CampaignId: j.ParsedParams.CampaignId,
-						ServiceId:  j.ParsedParams.ServiceId,
-						Msisdn:     msisdn,
-						Tid:        rec.GenerateTID(),
-					}
-					log.WithFields(log.Fields{
-						"tid":    r.Tid,
-						"msisdn": r.Msisdn,
-					}).Info("process")
-					r.Type = "injection"
-					j.Skip = i
-				send:
-					if err := j.sendToMobilinkRequests(0, r); err != nil {
-						log.WithFields(log.Fields{
-							"error": err.Error(),
-							"id":    r.RetryId,
-						}).Error("cannt process")
-						time.Sleep(time.Second)
-						goto send
-					}
-					i++
+					j.processInjection(i, &resume)
 				}
 			}
 		}
 		return
 	}()
 	return
+}
+func (j *Job) processInjection(i int64, resume *bool) {
+	var action string
+	orig, msisdn, err := j.nextMsisdn()
+	defer func() {
+		j.logMsisdn(i, orig, action, err)
+	}()
+
+	if err != nil {
+		action = "skip"
+		if err == errPaidInTransactions {
+			log.WithFields(log.Fields{
+				"msisdn": msisdn,
+			}).Warn("already paid")
+			return
+		}
+		log.WithFields(log.Fields{
+			"orig":   orig,
+			"msisdn": msisdn,
+			"error":  err.Error(),
+		}).Error("skip")
+		return
+	}
+	if *resume && i < j.Skip {
+		action = "skip"
+		err = fmt.Errorf("skip until: %d", j.Skip)
+		return
+	} else {
+		*resume = false
+	}
+
+	if _, ok := svc.jobs.cache[j.Id][msisdn]; ok {
+		log.WithFields(log.Fields{
+			"msisdn": msisdn,
+		}).Info("duplicate")
+		action = "skip duplicate"
+		return
+	} else {
+		svc.jobs.cache[j.Id][msisdn] = struct{}{}
+	}
+
+	if msisdn == "" && err == nil {
+		log.WithFields(log.Fields{"count": i}).Info("done")
+		svc.jobs.running[j.Id].finished = true
+		svc.jobs.running[j.Id].Status = "done"
+		return
+	}
+	r := rec.Record{
+		CampaignId: j.ParsedParams.CampaignId,
+		ServiceId:  j.ParsedParams.ServiceId,
+		Msisdn:     msisdn,
+		Tid:        rec.GenerateTID(),
+	}
+	log.WithFields(log.Fields{
+		"tid":    r.Tid,
+		"msisdn": r.Msisdn,
+	}).Info("process")
+
+	r.Type = "injection"
+	j.Skip = i
+
+send:
+	if err := j.sendToMobilinkRequests(0, r); err != nil {
+		log.WithFields(log.Fields{
+			"error": err.Error(),
+			"id":    r.RetryId,
+		}).Error("cannt process")
+		time.Sleep(time.Second)
+		goto send
+	}
+	action = "sent"
 }
 func (j *Job) openFile() error {
 	var err error
@@ -696,6 +728,19 @@ func (j *jobs) setStatus(id int64, status string) (err error) {
 	}
 	return
 }
+
+func (j *jobs) setLog(id int64, path string) (err error) {
+	query := fmt.Sprintf("UPDATE %sjobs SET log_path = $1 WHERE id = $2 ",
+		svc.conf.db.TablePrefix,
+	)
+	_, err = svc.dbConn.Exec(query, path, id)
+	if err != nil {
+		DBErrors.Inc()
+		err = fmt.Errorf("db.Exec: %s, query: %s", err.Error(), query)
+		return
+	}
+	return
+}
 func (j *jobs) setSkip(skip int64, id int64) (err error) {
 
 	query := fmt.Sprintf("UPDATE %sjobs SET skip = $1, finished_at =$2 WHERE id = $3",
@@ -802,7 +847,7 @@ func (j *jobs) getExpiredList(p Params) (expired []rec.Record, err error) {
 	}).Debug("run query")
 
 	query = fmt.Sprintf("SELECT "+
-		"DISTINCT ON (msisdn), "+
+		"DISTINCT ON (msisdn) msisdn, "+
 		"id, "+
 		"tid, "+
 		"created_at, "+
@@ -888,4 +933,18 @@ func (j *Job) sendToMobilinkRequests(priority uint8, r rec.Record) (err error) {
 		"tid": r.Tid,
 	}).Info("sent")
 	return nil
+}
+
+func (j *Job) logMsisdn(idx int64, msisdn, action string, err error) {
+	if msisdn == "" {
+		return
+	}
+
+	fields := log.Fields{
+		"msisdn": msisdn,
+	}
+	if err != nil {
+		fields["error"] = err.Error()
+	}
+	j.log.WithFields(fields).Println(idx)
 }
