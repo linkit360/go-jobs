@@ -15,6 +15,9 @@ import (
 	"time"
 )
 
+// script parses records in json and let them be added in subscriptions
+// usually it's needed when dispatcher couldn;t sent them in mt manager
+
 type conf struct {
 	Notifier rbmq.NotifierConfig `yaml:"notifier"`
 }

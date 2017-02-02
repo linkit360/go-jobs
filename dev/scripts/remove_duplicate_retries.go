@@ -13,6 +13,9 @@ import (
 	"github.com/vostrok/utils/rec"
 )
 
+// get uplicate retries by msisdn
+// and move them to xmp_retries_expired
+
 func init() {
 	log.SetLevel(log.DebugLevel)
 }
