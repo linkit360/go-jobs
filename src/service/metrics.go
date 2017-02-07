@@ -7,6 +7,7 @@ import (
 	log "github.com/Sirupsen/logrus"
 	"github.com/prometheus/client_golang/prometheus"
 
+	"github.com/vostrok/jobs/src/config"
 	m "github.com/vostrok/utils/metrics"
 )
 
@@ -19,9 +20,11 @@ var (
 	RetriesPeriod             prometheus.Gauge
 	RetriesCount              prometheus.Gauge
 	ExpiredRetriesCount       prometheus.Gauge
+	ActualDBSize              prometheus.Gauge
+	AllowedDBSize             prometheus.Gauge
 )
 
-func initMetrics(name string) {
+func initMetrics(name string, metricsConfig config.MetricsConfig) {
 	NotifyErrors = m.NewGauge("", "", "notify_errors", "sent to mt manager queue error")
 	Errors = m.NewGauge("", "", "errors", "errors")
 	DBErrors = m.NewGauge("", "", "db_errors", "db_errors")
@@ -30,6 +33,8 @@ func initMetrics(name string) {
 	RetriesPeriod = m.PrometheusGauge("retries", "period", "seconds", "retries period seconds")
 	RetriesCount = m.PrometheusGauge("retries", "", "count", "retries count")
 	ExpiredRetriesCount = m.PrometheusGauge("retries", "expired", "count", "expired retries count")
+	ActualDBSize = m.PrometheusGauge("actual", "db_size", "bytes", "expired retries count")
+	AllowedDBSize = m.PrometheusGauge("allowed", "db_size", "bytes", "expired retries count")
 
 	go func() {
 		for range time.Tick(time.Minute) {
@@ -95,6 +100,14 @@ func initMetrics(name string) {
 			} else {
 				ExpiredRetriesCount.Set(float64(expiredRetriesTotalCount))
 			}
+
+			dbSize, err := getDBSize()
+			if err != nil {
+				ActualDBSize.Set(float64(0))
+			} else {
+				ActualDBSize.Set(float64(dbSize))
+			}
+			AllowedDBSize.Set(float64(metricsConfig.AllowedDBSizeBytes))
 		}
 	}()
 }
@@ -327,6 +340,51 @@ func getExpiredRetriesCount() (count float64, err error) {
 		); err != nil {
 			DBErrors.Inc()
 
+			err = fmt.Errorf("rows.Scan: %s", err.Error())
+			return
+		}
+	}
+	if rows.Err() != nil {
+		DBErrors.Inc()
+
+		err = fmt.Errorf("rows.Err: %s", err.Error())
+		return
+	}
+	return
+}
+
+func getDBSize() (size int64, err error) {
+	begin := time.Now()
+	defer func() {
+		defer func() {
+			fields := log.Fields{
+				"took": time.Since(begin),
+			}
+			if err != nil {
+				fields["error"] = err.Error()
+				log.WithFields(fields).Error("get db size failed")
+			} else {
+				log.WithFields(fields).Debug("get db size")
+			}
+		}()
+	}()
+
+	// pg_size_pretty
+	query := fmt.Sprintf("SELECT pg_database_size('%s')", svc.conf.db.Name)
+	rows, err := svc.dbConn.Query(query)
+	if err != nil {
+		DBErrors.Inc()
+
+		err = fmt.Errorf("db.Query: %s, query: %s", err.Error(), query)
+		return 0, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		if err = rows.Scan(
+			&size,
+		); err != nil {
+			DBErrors.Inc()
 			err = fmt.Errorf("rows.Scan: %s", err.Error())
 			return
 		}

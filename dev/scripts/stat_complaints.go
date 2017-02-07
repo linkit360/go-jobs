@@ -10,6 +10,7 @@ import (
 	"github.com/jinzhu/configor"
 
 	dbconn "github.com/vostrok/utils/db"
+	logger "github.com/vostrok/utils/log"
 )
 
 // stat report
@@ -25,11 +26,13 @@ type conf struct {
 }
 
 var dbConn *sql.DB
+var logFile *log.Logger
 
 func main() {
 	cfg := flag.String("config", "jobs.yml", "configuration yml file")
 	from := flag.String("from", "2017-01-01", "date from")
 	to := flag.String("to", "2017-01-31", "date to")
+	logPath := flag.String("log", "stat_complaints.log", "log path")
 	flag.Parse()
 
 	var appConfig conf
@@ -39,6 +42,8 @@ func main() {
 			log.WithField("config", err.Error()).Fatal("config load error")
 		}
 	}
+
+	logFile = logger.GetFileLogger(*logPath)
 
 	dbConn = dbconn.Init(appConfig.Db)
 	runScript(*from, *to)
@@ -82,6 +87,11 @@ func runScript(fromS, toS string) {
 			"took": time.Since(begin).Minutes(),
 			"res":  res,
 		}).Debug("done")
+		logFile.WithFields(log.Fields{
+			"date": from.String()[:10],
+			"took": time.Since(begin).Minutes(),
+		}).Println(res)
+
 		from = from.Add(24 * time.Hour)
 	}
 	log.WithFields(log.Fields{}).Info("done")

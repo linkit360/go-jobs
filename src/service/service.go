@@ -34,6 +34,7 @@ type Config struct {
 func InitService(
 	appName string,
 	serverConfig config.ServerConfig,
+	metricsConfig config.MetricsConfig,
 	jobsConfig config.JobsConfig,
 	inMemConfig inmem_client.RPCClientConfig,
 	dbConf db.DataBaseConfig,
@@ -52,7 +53,7 @@ func InitService(
 		db:        dbConf,
 		publisher: notifierConfig,
 	}
-	initMetrics(appName)
+	initMetrics(appName, metricsConfig)
 
 	if err := inmem_client.Init(inMemConfig); err != nil {
 		log.Fatal("cann't init inmemory service")

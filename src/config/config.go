@@ -21,11 +21,16 @@ type ServerConfig struct {
 type AppConfig struct {
 	AppName           string                       `yaml:"app_name"`
 	Server            ServerConfig                 `yaml:"server"`
+	Metrics           MetricsConfig                `yaml:"metrics"`
 	Jobs              JobsConfig                   `yaml:"jobs"`
 	InMemClientConfig inmem_client.RPCClientConfig `yaml:"inmem_client"`
 	DbConf            db.DataBaseConfig            `yaml:"db"`
 	DbSlaveConf       db.DataBaseConfig            `yaml:"db_slave"`
 	Notifier          amqp.NotifierConfig          `yaml:"publisher"`
+}
+
+type MetricsConfig struct {
+	AllowedDBSizeBytes uint64 `yaml:"allowed_db_size"`
 }
 
 type JobsConfig struct {

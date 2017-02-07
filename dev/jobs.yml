@@ -3,6 +3,9 @@ app_name: jobs
 server:
   port: 50303
 
+metrics:
+  allowed_db_size: 141183828140
+
 jobs:
   planned_enabled: false
   injections_path: /var/www/xmp.linkit360.ru/web/injections
