@@ -34,7 +34,7 @@ func initMetrics(name string, metricsConfig config.MetricsConfig) {
 	RetriesCount = m.PrometheusGauge("retries", "", "count", "retries count")
 	ExpiredRetriesCount = m.PrometheusGauge("retries", "expired", "count", "expired retries count")
 	ActualDBSize = m.PrometheusGauge("actual", "db_size", "bytes", "expired retries count")
-	AllowedDBSize = m.PrometheusGauge("allowed", "db_size", "bytes", "expired retries count")
+	AllowedDBSize = m.PrometheusGauge("capacity", "db_size", "bytes", "expired retries count")
 
 	go func() {
 		for range time.Tick(time.Minute) {
@@ -101,12 +101,22 @@ func initMetrics(name string, metricsConfig config.MetricsConfig) {
 				ExpiredRetriesCount.Set(float64(expiredRetriesTotalCount))
 			}
 
-			dbSize, err := getDBSize()
-			if err != nil {
-				ActualDBSize.Set(float64(0))
-			} else {
-				ActualDBSize.Set(float64(dbSize))
+			dbSumSize := int64(0)
+			for _, name := range metricsConfig.Databases {
+				dbSize, err := getDBSize(name)
+				if err != nil {
+					err = fmt.Errorf("%s getDBSize: %s", name, err.Error())
+					log.WithFields(log.Fields{
+						"error": err.Error(),
+					}).Error("get db size")
+				} else {
+					dbSumSize = dbSumSize + dbSize
+				}
 			}
+			log.WithFields(log.Fields{
+				"sum": dbSumSize,
+			}).Error("db size")
+			ActualDBSize.Set(float64(dbSumSize))
 			AllowedDBSize.Set(float64(metricsConfig.AllowedDBSizeBytes))
 		}
 	}()
@@ -353,24 +363,26 @@ func getExpiredRetriesCount() (count float64, err error) {
 	return
 }
 
-func getDBSize() (size int64, err error) {
+func getDBSize(dbname string) (size int64, err error) {
 	begin := time.Now()
 	defer func() {
 		defer func() {
 			fields := log.Fields{
+				"name": dbname,
 				"took": time.Since(begin),
 			}
 			if err != nil {
 				fields["error"] = err.Error()
 				log.WithFields(fields).Error("get db size failed")
 			} else {
+				fields["size"] = size
 				log.WithFields(fields).Debug("get db size")
 			}
 		}()
 	}()
 
 	// pg_size_pretty
-	query := fmt.Sprintf("SELECT pg_database_size('%s')", svc.conf.db.Name)
+	query := fmt.Sprintf("SELECT pg_database_size('%s')", dbname)
 	rows, err := svc.dbConn.Query(query)
 	if err != nil {
 		DBErrors.Inc()

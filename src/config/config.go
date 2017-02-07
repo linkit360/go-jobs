@@ -30,7 +30,8 @@ type AppConfig struct {
 }
 
 type MetricsConfig struct {
-	AllowedDBSizeBytes uint64 `yaml:"allowed_db_size"`
+	AllowedDBSizeBytes uint64   `yaml:"allowed_db_size"`
+	Databases          []string `yaml:"db"`
 }
 
 type JobsConfig struct {
