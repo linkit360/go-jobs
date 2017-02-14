@@ -115,7 +115,7 @@ func initMetrics(name string, metricsConfig config.MetricsConfig) {
 			}
 			log.WithFields(log.Fields{
 				"sum": dbSumSize,
-			}).Error("db size")
+			}).Debug("db size")
 			ActualDBSize.Set(float64(dbSumSize))
 			AllowedDBSize.Set(float64(metricsConfig.AllowedDBSizeBytes))
 		}
