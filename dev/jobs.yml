@@ -17,7 +17,9 @@ jobs:
   callback_url: http://dev.pk.linkit360.ru/test
 
 inmem_client:
+  dsn: :50307
   timeout: 10
+
 
 publisher:
   pending_buffer_path: /home/centos/linkit/jobs_pending.json
