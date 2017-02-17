@@ -187,6 +187,6 @@ func (ss *suspendedSubscriptions) sendTarifficate(r rec.Record) error {
 		"msisdn": r.Msisdn,
 		"queue":  queue,
 	}).Info("send")
-	svc.publisher.Publish(amqp.AMQPMessage{queue, 0, body})
+	svc.publisher.Publish(amqp.AMQPMessage{queue, 0, body, event.EventName})
 	return nil
 }
