@@ -36,7 +36,7 @@ func InitService(
 	serverConfig config.ServerConfig,
 	metricsConfig config.MetricsConfig,
 	jobsConfig config.JobsConfig,
-	inMemConfig inmem_client.RPCClientConfig,
+	inMemConfig inmem_client.ClientConfig,
 	dbConf db.DataBaseConfig,
 	dbSlaveConf db.DataBaseConfig,
 	notifierConfig amqp.NotifierConfig,

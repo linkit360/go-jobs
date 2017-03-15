@@ -19,14 +19,14 @@ type ServerConfig struct {
 }
 
 type AppConfig struct {
-	AppName           string                       `yaml:"app_name"`
-	Server            ServerConfig                 `yaml:"server"`
-	Metrics           MetricsConfig                `yaml:"metrics"`
-	Jobs              JobsConfig                   `yaml:"jobs"`
-	InMemClientConfig inmem_client.RPCClientConfig `yaml:"inmem_client"`
-	DbConf            db.DataBaseConfig            `yaml:"db"`
-	DbSlaveConf       db.DataBaseConfig            `yaml:"db_slave"`
-	Notifier          amqp.NotifierConfig          `yaml:"publisher"`
+	AppName           string                    `yaml:"app_name"`
+	Server            ServerConfig              `yaml:"server"`
+	Metrics           MetricsConfig             `yaml:"metrics"`
+	Jobs              JobsConfig                `yaml:"jobs"`
+	InMemClientConfig inmem_client.ClientConfig `yaml:"inmem_client"`
+	DbConf            db.DataBaseConfig         `yaml:"db"`
+	DbSlaveConf       db.DataBaseConfig         `yaml:"db_slave"`
+	Notifier          amqp.NotifierConfig       `yaml:"publisher"`
 }
 
 type MetricsConfig struct {
