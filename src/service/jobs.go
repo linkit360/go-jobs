@@ -16,11 +16,11 @@ import (
 	log "github.com/Sirupsen/logrus"
 	"github.com/gin-gonic/gin"
 
-	"github.com/vostrok/jobs/src/config"
-	"github.com/vostrok/utils/amqp"
-	"github.com/vostrok/utils/db"
-	logger "github.com/vostrok/utils/log"
-	"github.com/vostrok/utils/rec"
+	"github.com/linkit360/go-jobs/src/config"
+	"github.com/linkit360/go-utils/amqp"
+	"github.com/linkit360/go-utils/db"
+	logger "github.com/linkit360/go-utils/log"
+	"github.com/linkit360/go-utils/rec"
 )
 
 func init() {

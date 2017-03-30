@@ -6,9 +6,9 @@ import (
 	log "github.com/Sirupsen/logrus"
 	"github.com/gin-gonic/gin"
 
-	"github.com/vostrok/jobs/src/config"
-	"github.com/vostrok/jobs/src/service"
-	m "github.com/vostrok/utils/metrics"
+	"github.com/linkit360/go-jobs/src/config"
+	"github.com/linkit360/go-jobs/src/service"
+	m "github.com/linkit360/go-utils/metrics"
 )
 
 func RunServer() {

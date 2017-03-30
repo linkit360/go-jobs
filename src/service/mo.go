@@ -1,6 +1,7 @@
 package service
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"strconv"
@@ -10,9 +11,8 @@ import (
 	log "github.com/Sirupsen/logrus"
 	"github.com/gin-gonic/gin"
 
-	"database/sql"
-	"github.com/vostrok/utils/amqp"
-	rec "github.com/vostrok/utils/rec"
+	"github.com/linkit360/go-utils/amqp"
+	rec "github.com/linkit360/go-utils/rec"
 )
 
 type suspendedSubscriptions struct {

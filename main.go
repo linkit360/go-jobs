@@ -5,7 +5,7 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/vostrok/jobs/src"
+	"github.com/linkit360/go-jobs/src"
 )
 
 func main() {

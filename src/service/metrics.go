@@ -7,8 +7,8 @@ import (
 	log "github.com/Sirupsen/logrus"
 	"github.com/prometheus/client_golang/prometheus"
 
-	"github.com/vostrok/jobs/src/config"
-	m "github.com/vostrok/utils/metrics"
+	"github.com/linkit360/go-jobs/src/config"
+	m "github.com/linkit360/go-utils/metrics"
 )
 
 var (

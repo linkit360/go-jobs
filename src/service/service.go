@@ -8,10 +8,10 @@ import (
 
 	log "github.com/Sirupsen/logrus"
 
-	inmem_client "github.com/vostrok/inmem/rpcclient"
-	"github.com/vostrok/jobs/src/config"
-	"github.com/vostrok/utils/amqp"
-	"github.com/vostrok/utils/db"
+	inmem_client "github.com/linkit360/go-inmem/rpcclient"
+	"github.com/linkit360/go-jobs/src/config"
+	"github.com/linkit360/go-utils/amqp"
+	"github.com/linkit360/go-utils/db"
 )
 
 var svc Service
