@@ -147,7 +147,7 @@ func (ss *suspendedSubscriptions) get(operatorCode int64, hours, limit int) (rec
 			&record.AttemptsCount,
 			&record.DelayHours,
 			&record.PaidHours,
-			&record.KeepDays,
+			&record.RetryDays,
 			&record.Price,
 		); err != nil {
 			DBErrors.Inc()

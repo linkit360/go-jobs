@@ -20,9 +20,7 @@ inmem_client:
   dsn: :50307
   timeout: 10
 
-
 publisher:
-  pending_buffer_path: /home/centos/linkit/jobs_pending.json
   chan_capacity: 100
   conn:
     user: linkit

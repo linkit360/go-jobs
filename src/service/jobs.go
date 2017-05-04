@@ -894,7 +894,7 @@ func (j *jobs) getExpiredList(p Params) (expired []rec.Record, err error) {
 			&record.CreatedAt,
 			&record.LastPayAttemptAt,
 			&record.AttemptsCount,
-			&record.KeepDays,
+			&record.RetryDays,
 			&record.DelayHours,
 			&record.Price,
 			&record.OperatorCode,
