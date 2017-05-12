@@ -6,8 +6,7 @@ server:
 metrics:
   allowed_db_size: 141183828140
   db:
-  - linkit_yondu
-  - linkit_cheese
+  - linkit_dev
 
 jobs:
   planned_enabled: false

@@ -189,9 +189,7 @@ func getSuspendedSubscriptionsCount() (count int, err error) {
 		}()
 	}()
 
-	query := fmt.Sprintf("SELECT count(*) count FROM %ssubscriptions "+
-		"WHERE result = ''"+
-		"AND sent_at < (CURRENT_TIMESTAMP - 2 * INTERVAL '1 hour' ) ",
+	query := fmt.Sprintf("SELECT count(*) count FROM %ssubscriptions WHERE result = 'pending'",
 		svc.conf.db.TablePrefix,
 	)
 	rows, err := svc.dbConn.Query(query)
