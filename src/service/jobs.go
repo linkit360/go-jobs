@@ -16,6 +16,7 @@ import (
 	log "github.com/Sirupsen/logrus"
 	"github.com/gin-gonic/gin"
 
+	inmem_client "github.com/linkit360/go-inmem/rpcclient"
 	"github.com/linkit360/go-jobs/src/config"
 	"github.com/linkit360/go-utils/amqp"
 	"github.com/linkit360/go-utils/db"
@@ -51,6 +52,7 @@ type Job struct {
 	log           *log.Logger    `json:"-"`
 	finished      bool           `json:"finished"`
 }
+
 type Params struct {
 	DateFrom     string `json:"date_from,omitempty"`
 	DateTo       string `json:"date_to,omitempty"`
@@ -94,6 +96,7 @@ func AddJobHandlers(r *gin.Engine) {
 	rg.Group("/resume").GET("", svc.jobs.start)
 	rg.Group("/status").GET("", svc.jobs.status)
 }
+
 func (j *jobs) planned() {
 	for range time.Tick(time.Second) {
 		jobs, err := j.getList("ready")
@@ -202,6 +205,27 @@ func (j *jobs) startJob(id int64, resume bool) error {
 			"error": err.Error(),
 		}).Info("failed")
 		return err
+	}
+
+	if job.Type == "injection" {
+		_, err := inmem_client.GetServiceById(job.ParsedParams.ServiceId)
+		if err != nil {
+			err = fmt.Errorf("inmem_client.GetServiceById: %s", err.Error())
+			log.WithFields(log.Fields{
+				"id":      job.Id,
+				"jobStop": err.Error(),
+			}).Info("exiting")
+			return err
+		}
+		_, err = inmem_client.GetCampaignById(job.ParsedParams.CampaignId)
+		if err != nil {
+			err = fmt.Errorf("inmem_client.GetCampaignById: %s", err.Error())
+			log.WithFields(log.Fields{
+				"id":      job.Id,
+				"jobStop": err.Error(),
+			}).Info("exiting")
+			return err
+		}
 	}
 
 	if err := svc.jobs.setStatus(id, "in progress"); err != nil {
@@ -415,7 +439,7 @@ func (j *Job) processInjection(i int64, resume *bool) {
 		CampaignId: j.ParsedParams.CampaignId,
 		ServiceId:  j.ParsedParams.ServiceId,
 		Msisdn:     msisdn,
-		Tid:        rec.GenerateTID(),
+		Tid:        rec.GenerateTID(msisdn),
 	}
 	log.WithFields(log.Fields{
 		"tid":    r.Tid,
@@ -861,7 +885,7 @@ func (j *jobs) getExpiredList(p Params) (expired []rec.Record, err error) {
 		"created_at, "+
 		"last_pay_attempt_at, "+
 		"attempts_count, "+
-		"keep_days, "+
+		"retry_days, "+
 		"delay_hours, "+
 		"price, "+
 		"operator_code, "+
