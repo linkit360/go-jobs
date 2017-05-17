@@ -6,13 +6,13 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"time"
 
 	log "github.com/Sirupsen/logrus"
 	"github.com/jinzhu/configor"
 
 	"github.com/vostrok/dispatcherd/src/rbmq"
 	"github.com/vostrok/utils/rec"
-	"time"
 )
 
 // script parses records in json and let them be added in subscriptions
