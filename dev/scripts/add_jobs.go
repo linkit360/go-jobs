@@ -30,8 +30,9 @@ func main() {
 
 	params := flag.String(
 		"params",
-		`{"count": 2, "never": 1, "dry_run": false, "service_id": 111, "campaign_id": 354}`,
-		"params for job (service id, count, dry run, etc)")
+		`{"count": 10000, "never": 1, "dry_run": false, "service_id": 111, "campaign_id": 354}`,
+		"params for job (service id, count, dry run, etc)",
+	)
 
 	flag.Parse()
 
@@ -54,7 +55,6 @@ func main() {
 		log.WithField("error", err.Error()).Fatal("cannot read dir")
 	}
 	runAt := time.Now().UTC()
-
 	for _, f := range files {
 		job := service.Job{
 			UserId:   0,

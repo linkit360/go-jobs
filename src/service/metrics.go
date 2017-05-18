@@ -19,6 +19,7 @@ var (
 	PendingRetriesCount       prometheus.Gauge
 	BlacklistedCount          prometheus.Gauge
 	PostpaidCount             prometheus.Gauge
+	BufferPixelsCount         prometheus.Gauge
 	ActualDBSize              prometheus.Gauge
 	AllowedDBSize             prometheus.Gauge
 )
@@ -30,6 +31,7 @@ func initMetrics(name string, metricsConfig config.MetricsConfig) {
 	PendingSubscriptionsCount = m.PrometheusGauge("pending", "subscriptions", "count", "pending subscriptions count")
 	BlacklistedCount = m.PrometheusGauge("", "blacklisted", "count", "blacklisted count")
 	PostpaidCount = m.PrometheusGauge("", "postpaid", "count", "postpaid count")
+	BufferPixelsCount = m.PrometheusGauge("", "buffer_pixels", "count", "buffer pixels count")
 	PendingRetriesCount = m.PrometheusGauge("pending", "retries", "count", "pending retries count")
 	ActualDBSize = m.PrometheusGauge("actual", "db_size", "bytes", "expired retries count")
 	AllowedDBSize = m.PrometheusGauge("capacity", "db_size", "bytes", "expired retries count")
@@ -92,6 +94,20 @@ func initMetrics(name string, metricsConfig config.MetricsConfig) {
 				PostpaidCount.Set(float64(0))
 			} else {
 				PostpaidCount.Set(float64(postpaid))
+			}
+
+			pixelBufferCount, err := getCount(
+				"pixel buffers",
+				fmt.Sprintf("SELECT count(*) count from %spixel_buffer", svc.conf.db.TablePrefix),
+			)
+			if err != nil {
+				err = fmt.Errorf("get pixel buffer count: %s", err.Error())
+				log.WithFields(log.Fields{
+					"error": err.Error(),
+				}).Error("failed")
+				BufferPixelsCount.Set(float64(0))
+			} else {
+				BufferPixelsCount.Set(float64(pixelBufferCount))
 			}
 
 			dbSumSize := int64(0)

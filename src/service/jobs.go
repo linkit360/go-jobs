@@ -44,6 +44,7 @@ type Job struct {
 	Status        string         `json:"status"`
 	FileName      string         `json:"file_name,omitempty"`
 	Params        string         `json:"params,omitempty"`
+	PriceCents    int            `json:"-"`
 	Skip          int64          `json:"skip,omitempty"`
 	StopRequested bool           `json:"-"`
 	ParsedParams  Params         `json:"parsed_params,omitempty"`
@@ -98,7 +99,7 @@ func AddJobHandlers(r *gin.Engine) {
 }
 
 func (j *jobs) planned() {
-	for range time.Tick(time.Second) {
+	for range time.Tick(time.Hour) {
 		jobs, err := j.getList("ready")
 		if err != nil {
 			log.WithFields(log.Fields{
@@ -108,7 +109,7 @@ func (j *jobs) planned() {
 		}
 
 		for _, job := range jobs {
-			if time.Now().Sub(job.RunAt) > 10 && job.Status == "ready" {
+			if time.Now().Sub(job.RunAt).Seconds() > 10 && job.Status == "ready" {
 				if err = svc.jobs.startJob(job.Id, false); err != nil {
 					log.WithFields(log.Fields{
 						"error": err.Error(),
@@ -208,7 +209,7 @@ func (j *jobs) startJob(id int64, resume bool) error {
 	}
 
 	if job.Type == "injection" {
-		_, err := inmem_client.GetServiceById(job.ParsedParams.ServiceId)
+		s, err := inmem_client.GetServiceById(job.ParsedParams.ServiceId)
 		if err != nil {
 			err = fmt.Errorf("inmem_client.GetServiceById: %s", err.Error())
 			log.WithFields(log.Fields{
@@ -217,6 +218,8 @@ func (j *jobs) startJob(id int64, resume bool) error {
 			}).Info("exiting")
 			return err
 		}
+		job.PriceCents = 100 * int(s.Price)
+
 		_, err = inmem_client.GetCampaignById(job.ParsedParams.CampaignId)
 		if err != nil {
 			err = fmt.Errorf("inmem_client.GetCampaignById: %s", err.Error())
@@ -338,6 +341,8 @@ func (j *Job) run(resume bool) {
 
 					r.Type = "expired"
 					j.Skip = r.RetryId
+					r.Price = j.PriceCents
+					r.OperatorCode = 41001
 
 				send:
 					if err := j.sendToMobilinkRequests(0, r); err != nil {
@@ -435,12 +440,16 @@ func (j *Job) processInjection(i int64, resume *bool) {
 		svc.jobs.running[j.Id].Status = "done"
 		return
 	}
+
 	r := rec.Record{
-		CampaignId: j.ParsedParams.CampaignId,
-		ServiceId:  j.ParsedParams.ServiceId,
-		Msisdn:     msisdn,
-		Tid:        rec.GenerateTID(msisdn),
+		CampaignId:   j.ParsedParams.CampaignId,
+		ServiceId:    j.ParsedParams.ServiceId,
+		OperatorCode: 41001,
+		Msisdn:       msisdn,
+		Tid:          rec.GenerateTID(msisdn),
+		Price:        j.PriceCents,
 	}
+
 	log.WithFields(log.Fields{
 		"tid":    r.Tid,
 		"msisdn": r.Msisdn,
@@ -546,7 +555,8 @@ func (j *Job) nextMsisdn() (orig, msisdn string, err error) {
 			"msisdn": msisdn,
 		}).Info("never?")
 		query := fmt.Sprintf("SELECT 1 FROM %stransactions "+
-			" WHERE ( result = 'paid' OR result = 'retry_paid') AND msisdn = $1 LIMIT 1",
+			" WHERE ( result = 'paid' OR result = 'retry_paid' OR result = 'injection_paid' OR result = 'expired_paid') AND "+
+			" msisdn = $1 LIMIT 1",
 			svc.conf.db.TablePrefix,
 		)
 
@@ -623,7 +633,8 @@ func (j *jobs) getList(status string) (jobs []Job, err error) {
 	defer func() {
 		defer func() {
 			fields := log.Fields{
-				"took": time.Since(begin),
+				"took":   time.Since(begin),
+				"status": status,
 			}
 			if err != nil {
 				fields["error"] = err.Error()
@@ -834,7 +845,7 @@ func (j *jobs) getExpiredList(p Params) (expired []rec.Record, err error) {
 		wheres = append(wheres, fmt.Sprintf("msisdn NOT IN ("+
 			" SELECT DISTINCT msisdn "+
 			" FROM %stransactions "+
-			" WHERE ( result = 'paid' OR result = 'retry_paid') )",
+			" WHERE ( result = 'paid' OR result = 'retry_paid' OR result = 'injection_paid' OR result = 'expired_paid') )",
 			svc.conf.db.TablePrefix),
 		)
 	}
