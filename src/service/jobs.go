@@ -61,8 +61,8 @@ type Params struct {
 	Offset       int64  `json:"offset,omitempty"`
 	Order        string `json:"order,omitempty"`
 	Never        int    `json:"never,omitempty"`
-	ServiceId    int64  `json:"service_id,omitempty"`
-	CampaignId   int64  `json:"campaign_id,omitempty"`
+	ServiceCode  string `json:"service_code,omitempty"`
+	CampaignCode string `json:"campaign_code,omitempty"`
 	DryRun       bool   `json:"dry_run,omitempty"`
 	LastChargeAt string `json:"last_charge_at,omitempty"`
 }
@@ -209,7 +209,7 @@ func (j *jobs) startJob(id int64, resume bool) error {
 	}
 
 	if job.Type == "injection" {
-		s, err := inmem_client.GetServiceById(job.ParsedParams.ServiceId)
+		s, err := inmem_client.GetServiceByCode(job.ParsedParams.ServiceCode)
 		if err != nil {
 			err = fmt.Errorf("inmem_client.GetServiceById: %s", err.Error())
 			log.WithFields(log.Fields{
@@ -220,7 +220,7 @@ func (j *jobs) startJob(id int64, resume bool) error {
 		}
 		job.PriceCents = 100 * int(s.Price)
 
-		_, err = inmem_client.GetCampaignById(job.ParsedParams.CampaignId)
+		_, err = inmem_client.GetCampaignByCode(job.ParsedParams.CampaignCode)
 		if err != nil {
 			err = fmt.Errorf("inmem_client.GetCampaignById: %s", err.Error())
 			log.WithFields(log.Fields{
@@ -321,11 +321,11 @@ func (j *Job) run(resume bool) {
 						"tid": r.Tid,
 					}).Info("process")
 
-					if j.ParsedParams.ServiceId > 0 {
-						r.ServiceId = j.ParsedParams.ServiceId
+					if j.ParsedParams.ServiceCode != "" {
+						r.ServiceCode = j.ParsedParams.ServiceCode
 					}
-					if j.ParsedParams.CampaignId > 0 {
-						r.CampaignId = j.ParsedParams.CampaignId
+					if j.ParsedParams.CampaignCode != "" {
+						r.CampaignCode = j.ParsedParams.CampaignCode
 					}
 
 					if _, ok := svc.jobs.cache[j.Id][r.Msisdn]; ok {
@@ -343,6 +343,7 @@ func (j *Job) run(resume bool) {
 					j.Skip = r.RetryId
 					r.Price = j.PriceCents
 					r.OperatorCode = 41001
+					r.AttemptsCount = 10 // any, just more than 0
 
 				send:
 					if err := j.sendToMobilinkRequests(0, r); err != nil {
@@ -442,12 +443,13 @@ func (j *Job) processInjection(i int64, resume *bool) {
 	}
 
 	r := rec.Record{
-		CampaignId:   j.ParsedParams.CampaignId,
-		ServiceId:    j.ParsedParams.ServiceId,
-		OperatorCode: 41001,
-		Msisdn:       msisdn,
-		Tid:          rec.GenerateTID(msisdn),
-		Price:        j.PriceCents,
+		CampaignCode:  j.ParsedParams.CampaignCode,
+		ServiceCode:   j.ParsedParams.ServiceCode,
+		OperatorCode:  41001,
+		Msisdn:        msisdn,
+		Tid:           rec.GenerateTID(msisdn),
+		Price:         j.PriceCents,
+		AttemptsCount: 10, // any, just more than 0
 	}
 
 	log.WithFields(log.Fields{
@@ -831,13 +833,13 @@ func (j *jobs) getExpiredList(p Params) (expired []rec.Record, err error) {
 		wheres = append(wheres, "created_at < %s")
 	}
 
-	if p.ServiceId > 0 {
-		args = append(args, p.ServiceId)
+	if p.ServiceCode != "" {
+		args = append(args, p.ServiceCode)
 		wheres = append(wheres, "id_service = %s")
 	}
 
-	if p.CampaignId > 0 {
-		args = append(args, p.CampaignId)
+	if p.CampaignCode != "" {
+		args = append(args, p.CampaignCode)
 		wheres = append(wheres, "id_campaign = %s")
 	}
 
@@ -934,9 +936,9 @@ func (j *jobs) getExpiredList(p Params) (expired []rec.Record, err error) {
 			&record.Price,
 			&record.OperatorCode,
 			&record.CountryCode,
-			&record.ServiceId,
+			&record.ServiceCode,
 			&record.SubscriptionId,
-			&record.CampaignId,
+			&record.CampaignCode,
 		); err != nil {
 			DBErrors.Inc()
 			err = fmt.Errorf("Rows.Next: %s", err.Error())
