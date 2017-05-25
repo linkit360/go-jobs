@@ -16,8 +16,8 @@ import (
 	log "github.com/Sirupsen/logrus"
 	"github.com/gin-gonic/gin"
 
-	inmem_client "github.com/linkit360/go-inmem/rpcclient"
 	"github.com/linkit360/go-jobs/src/config"
+	inmem_client "github.com/linkit360/go-mid/rpcclient"
 	"github.com/linkit360/go-utils/amqp"
 	"github.com/linkit360/go-utils/db"
 	logger "github.com/linkit360/go-utils/log"
