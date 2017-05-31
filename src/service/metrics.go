@@ -45,7 +45,7 @@ func initMetrics(name string, metricsConfig config.MetricsConfig) {
 	}()
 
 	go func() {
-		for range time.Tick(time.Minute) {
+		for range time.Tick(time.Duration(metricsConfig.Period) * time.Second) {
 			retriesCount, err := getSuspendedRetriesCount()
 			if err != nil {
 				err = fmt.Errorf("getSuspendedRetriesCount: %s", err.Error())
@@ -83,11 +83,11 @@ func initMetrics(name string, metricsConfig config.MetricsConfig) {
 			}
 
 			postpaid, err := getCount(
-				"blacklisted",
+				"postpaid",
 				fmt.Sprintf("SELECT count(*) count from %smsisdn_postpaid", svc.conf.db.TablePrefix),
 			)
 			if err != nil {
-				err = fmt.Errorf("get blacklisted: %s", err.Error())
+				err = fmt.Errorf("get postpaid: %s", err.Error())
 				log.WithFields(log.Fields{
 					"error": err.Error(),
 				}).Error("failed")

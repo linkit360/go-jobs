@@ -9,7 +9,7 @@ import (
 	log "github.com/Sirupsen/logrus"
 	"github.com/jinzhu/configor"
 
-	inmem_client "github.com/linkit360/go-mid/rpcclient"
+	mid_client "github.com/linkit360/go-mid/rpcclient"
 	"github.com/linkit360/go-utils/amqp"
 	"github.com/linkit360/go-utils/db"
 )
@@ -19,17 +19,18 @@ type ServerConfig struct {
 }
 
 type AppConfig struct {
-	AppName           string                    `yaml:"app_name"`
-	Server            ServerConfig              `yaml:"server"`
-	Metrics           MetricsConfig             `yaml:"metrics"`
-	Jobs              JobsConfig                `yaml:"jobs"`
-	InMemClientConfig inmem_client.ClientConfig `yaml:"inmem_client"`
-	DbConf            db.DataBaseConfig         `yaml:"db"`
-	DbSlaveConf       db.DataBaseConfig         `yaml:"db_slave"`
-	Notifier          amqp.NotifierConfig       `yaml:"publisher"`
+	AppName     string                  `yaml:"app_name"`
+	Server      ServerConfig            `yaml:"server"`
+	Metrics     MetricsConfig           `yaml:"metrics"`
+	MidConfig   mid_client.ClientConfig `yaml:"mid_client"`
+	Jobs        JobsConfig              `yaml:"jobs"`
+	DbConf      db.DataBaseConfig       `yaml:"db"`
+	DbSlaveConf db.DataBaseConfig       `yaml:"db_slave"`
+	Notifier    amqp.NotifierConfig     `yaml:"publisher"`
 }
 
 type MetricsConfig struct {
+	Period             int      `yaml:"period" default:"600"`
 	AllowedDBSizeBytes uint64   `yaml:"allowed_db_size"`
 	Databases          []string `yaml:"db"`
 }

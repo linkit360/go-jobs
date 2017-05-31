@@ -9,7 +9,7 @@ import (
 	log "github.com/Sirupsen/logrus"
 
 	"github.com/linkit360/go-jobs/src/config"
-	inmem_client "github.com/linkit360/go-mid/rpcclient"
+	mid_client "github.com/linkit360/go-mid/rpcclient"
 	"github.com/linkit360/go-utils/amqp"
 	"github.com/linkit360/go-utils/db"
 )
@@ -36,7 +36,7 @@ func InitService(
 	serverConfig config.ServerConfig,
 	metricsConfig config.MetricsConfig,
 	jobsConfig config.JobsConfig,
-	inMemConfig inmem_client.ClientConfig,
+	midConfig mid_client.ClientConfig,
 	dbConf db.DataBaseConfig,
 	dbSlaveConf db.DataBaseConfig,
 	notifierConfig amqp.NotifierConfig,
@@ -55,8 +55,8 @@ func InitService(
 	}
 	initMetrics(appName, metricsConfig)
 
-	if err := inmem_client.Init(inMemConfig); err != nil {
-		log.Fatal("cann't init inmemory service")
+	if err := mid_client.Init(midConfig); err != nil {
+		log.Fatal("cann't init midory service")
 	}
 }
 

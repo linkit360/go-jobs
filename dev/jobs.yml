@@ -4,9 +4,14 @@ server:
   port: 50303
 
 metrics:
+  period: 600
   allowed_db_size: 141183828140
   db:
   - linkit_dev
+
+mid_client:
+  dsn: :50307
+  timeout: 10
 
 jobs:
   planned_enabled: false
@@ -14,10 +19,6 @@ jobs:
   log_path: /var/log/linkit/
   check_prefix: 92
   callback_url: http://dev.pk.linkit360.ru/test
-
-inmem_client:
-  dsn: :50307
-  timeout: 10
 
 publisher:
   chan_capacity: 100

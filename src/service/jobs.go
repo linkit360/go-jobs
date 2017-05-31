@@ -17,7 +17,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/linkit360/go-jobs/src/config"
-	inmem_client "github.com/linkit360/go-mid/rpcclient"
+	mid_client "github.com/linkit360/go-mid/rpcclient"
 	"github.com/linkit360/go-utils/amqp"
 	"github.com/linkit360/go-utils/db"
 	logger "github.com/linkit360/go-utils/log"
@@ -209,9 +209,9 @@ func (j *jobs) startJob(id int64, resume bool) error {
 	}
 
 	if job.Type == "injection" {
-		s, err := inmem_client.GetServiceByCode(job.ParsedParams.ServiceCode)
+		s, err := mid_client.GetServiceByCode(job.ParsedParams.ServiceCode)
 		if err != nil {
-			err = fmt.Errorf("inmem_client.GetServiceById: %s", err.Error())
+			err = fmt.Errorf("mid_client.GetServiceById: %s", err.Error())
 			log.WithFields(log.Fields{
 				"id":      job.Id,
 				"jobStop": err.Error(),
@@ -220,9 +220,9 @@ func (j *jobs) startJob(id int64, resume bool) error {
 		}
 		job.PriceCents = 100 * int(s.Price)
 
-		_, err = inmem_client.GetCampaignByCode(job.ParsedParams.CampaignCode)
+		_, err = mid_client.GetCampaignByCode(job.ParsedParams.CampaignCode)
 		if err != nil {
-			err = fmt.Errorf("inmem_client.GetCampaignById: %s", err.Error())
+			err = fmt.Errorf("mid_client.GetCampaignById: %s", err.Error())
 			log.WithFields(log.Fields{
 				"id":      job.Id,
 				"jobStop": err.Error(),

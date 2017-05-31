@@ -19,7 +19,7 @@ func RunServer() {
 		appConfig.Server,
 		appConfig.Metrics,
 		appConfig.Jobs,
-		appConfig.InMemClientConfig,
+		appConfig.MidConfig,
 		appConfig.DbConf,
 		appConfig.DbSlaveConf,
 		appConfig.Notifier,
