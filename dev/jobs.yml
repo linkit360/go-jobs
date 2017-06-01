@@ -15,6 +15,7 @@ mid_client:
 
 jobs:
   planned_enabled: false
+  planned_period_minutes: 1
   injections_path: /var/www/xmp.linkit360.ru/web/injections
   log_path: /var/log/linkit/
   check_prefix: 92

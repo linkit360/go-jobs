@@ -36,11 +36,12 @@ type MetricsConfig struct {
 }
 
 type JobsConfig struct {
-	PlannedEnabled bool   `yaml:"planned_enabled"`
-	InjectionsPath string `yaml:"injections_path" default:"/var/www/xmp.linkit360.ru/web/injections"`
-	LogPath        string `yaml:"log_path" default:"/var/log/"`
-	CheckPrefix    string `yaml:"prefix" default:"92"` // todo: move in settings or in db smth
-	CallBackUrl    string `yaml:"callback_url"`
+	PlannedEnabled       bool   `yaml:"planned_enabled"`
+	PlannedPeriodMinutes int    `yaml:"planned_period_minutes"`
+	InjectionsPath       string `yaml:"injections_path" default:"/var/www/xmp.linkit360.ru/web/injections"`
+	LogPath              string `yaml:"log_path" default:"/var/log/"`
+	CheckPrefix          string `yaml:"prefix" default:"92"` // todo: move in settings or in db smth
+	CallBackUrl          string `yaml:"callback_url"`
 }
 
 func LoadConfig() AppConfig {

@@ -3,7 +3,6 @@ package main
 import (
 	"flag"
 	"fmt"
-	"io/ioutil"
 	"time"
 
 	log "github.com/Sirupsen/logrus"
@@ -25,12 +24,12 @@ func main() {
 
 	jobPath := flag.String(
 		"path",
-		"inject",
+		"",
 		"path to job files, in /var/www/xmp.linkit360.ru/web/injections")
 
 	params := flag.String(
 		"params",
-		`{"count": 10000, "never": 1, "dry_run": false, "service_id": 111, "campaign_id": 354}`,
+		`{"count": 14000, "never": 1, "dry_run": false, "service_code": 111, "campaign_code": 354}`,
 		"params for job (service id, count, dry run, etc)",
 	)
 
@@ -49,22 +48,28 @@ func main() {
 
 	dbConn := db.Init(appConfig.Db)
 
-	fullPath := appConfig.Jobs.InjectionsPath + "/" + *jobPath
-	files, err := ioutil.ReadDir(fullPath)
-	if err != nil {
-		log.WithField("error", err.Error()).Fatal("cannot read dir")
-	}
+	//fullPath := appConfig.Jobs.InjectionsPath + "/" + *jobPath
+	//files, err := ioutil.ReadDir(fullPath)
+	//if err != nil {
+	//	log.WithField("error", err.Error()).Fatal("cannot read dir")
+	//}
 	runAt := time.Now().UTC()
-	for _, f := range files {
+	max := 81
+	skip := int64(120000)
+	for i := 0; i < max; i++ {
+
+		// /for _, f := range files {
 		job := service.Job{
 			UserId:   0,
 			RunAt:    runAt,
 			Type:     "injection",
 			Status:   "ready",
-			FileName: *jobPath + "/" + f.Name(),
+			FileName: *jobPath + "/" + "injections.csv",
 			Params:   *params,
-			Skip:     0,
+			Skip:     skip,
 		}
+		skip = skip + 14000
+
 		runAt = runAt.Add(24 * time.Hour)
 
 		query := fmt.Sprintf("INSERT INTO %sjobs ("+

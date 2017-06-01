@@ -46,6 +46,7 @@ type Job struct {
 	Params        string         `json:"params,omitempty"`
 	PriceCents    int            `json:"-"`
 	Skip          int64          `json:"skip,omitempty"`
+	Processed     int64          `json:"processed,omitempty"`
 	StopRequested bool           `json:"-"`
 	ParsedParams  Params         `json:"parsed_params,omitempty"`
 	fh            *os.File       `json:"-"`
@@ -58,7 +59,6 @@ type Params struct {
 	DateFrom     string `json:"date_from,omitempty"`
 	DateTo       string `json:"date_to,omitempty"`
 	Count        int64  `json:"count,omitempty"`
-	Offset       int64  `json:"offset,omitempty"`
 	Order        string `json:"order,omitempty"`
 	Never        int    `json:"never,omitempty"`
 	ServiceCode  string `json:"service_code,omitempty"`
@@ -94,12 +94,11 @@ func AddJobHandlers(r *gin.Engine) {
 	rg := r.Group("/jobs")
 	rg.Group("/start").GET("", svc.jobs.start)
 	rg.Group("/stop").GET("", svc.jobs.stop)
-	rg.Group("/resume").GET("", svc.jobs.start)
 	rg.Group("/status").GET("", svc.jobs.status)
 }
 
 func (j *jobs) planned() {
-	for range time.Tick(time.Hour) {
+	for range time.Tick(time.Duration(j.conf.PlannedPeriodMinutes) * time.Minute) {
 		jobs, err := j.getList("ready")
 		if err != nil {
 			log.WithFields(log.Fields{
@@ -110,7 +109,7 @@ func (j *jobs) planned() {
 
 		for _, job := range jobs {
 			if time.Now().Sub(job.RunAt).Seconds() > 10 && job.Status == "ready" {
-				if err = svc.jobs.startJob(job.Id, false); err != nil {
+				if err = svc.jobs.startJob(job.Id); err != nil {
 					log.WithFields(log.Fields{
 						"error": err.Error(),
 					}).Error("cannt process")
@@ -136,11 +135,8 @@ func (j *jobs) start(c *gin.Context) { // start?id=132123
 		})
 		return
 	}
-	resume := false
-	if strings.Contains(c.Request.URL.Path, "resume") {
-		resume = true
-	}
-	if err := j.startJob(id, resume); err != nil {
+
+	if err := j.startJob(id); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error": err.Error(),
 		})
@@ -183,7 +179,7 @@ func (j *jobs) status(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, jobs)
 }
-func (j *jobs) startJob(id int64, resume bool) error {
+func (j *jobs) startJob(id int64) error {
 	log.WithFields(log.Fields{
 		"id": id,
 	}).Info("start")
@@ -211,7 +207,7 @@ func (j *jobs) startJob(id int64, resume bool) error {
 	if job.Type == "injection" {
 		s, err := mid_client.GetServiceByCode(job.ParsedParams.ServiceCode)
 		if err != nil {
-			err = fmt.Errorf("mid_client.GetServiceById: %s", err.Error())
+			err = fmt.Errorf("mid_client.GetServiceByCode: %s", err.Error())
 			log.WithFields(log.Fields{
 				"id":      job.Id,
 				"jobStop": err.Error(),
@@ -222,7 +218,7 @@ func (j *jobs) startJob(id int64, resume bool) error {
 
 		_, err = mid_client.GetCampaignByCode(job.ParsedParams.CampaignCode)
 		if err != nil {
-			err = fmt.Errorf("mid_client.GetCampaignById: %s", err.Error())
+			err = fmt.Errorf("mid_client.GetCampaignByCode: %s", err.Error())
 			log.WithFields(log.Fields{
 				"id":      job.Id,
 				"jobStop": err.Error(),
@@ -273,13 +269,14 @@ func (j *jobs) startJob(id int64, resume bool) error {
 		}
 	}
 
-	svc.jobs.running[id].run(resume)
+	svc.jobs.running[id].run()
 	return nil
 }
 
-func (j *Job) run(resume bool) {
+func (j *Job) run() {
 	log.WithFields(log.Fields{
-		"id": j.Id,
+		"id":   j.Id,
+		"skip": j.Skip,
 	}).Info("run")
 
 	go func() {
@@ -307,15 +304,13 @@ func (j *Job) run(resume bool) {
 						}).Info("exiting")
 						return
 					}
-					if resume && r.RetryId < j.Skip {
+					if r.RetryId < j.Skip {
 						log.WithFields(log.Fields{
 							"tid": r.Tid,
 							"id":  r.RetryId,
 						}).Info("skip")
 						j.logMsisdn(r.RetryId, r.Msisdn, "skip", nil)
 						continue
-					} else {
-						resume = false
 					}
 					log.WithFields(log.Fields{
 						"tid": r.Tid,
@@ -369,14 +364,14 @@ func (j *Job) run(resume bool) {
 				defer j.closeJob()
 
 				var i int64
+				j.Processed = 0
 				for {
-					if j.ParsedParams.Count > 0 && i > j.ParsedParams.Count {
+					if j.ParsedParams.Count > 0 && j.Processed >= j.ParsedParams.Count {
 						svc.jobs.running[j.Id].finished = true
 						svc.jobs.running[j.Id].Status = "done"
 						return
 					}
 
-					i++
 					if j.StopRequested || svc.exiting {
 						log.WithFields(log.Fields{
 							"jobStop": j.StopRequested,
@@ -387,7 +382,9 @@ func (j *Job) run(resume bool) {
 
 						return
 					}
-					j.processInjection(i, &resume)
+
+					j.processInjection(i)
+					i++
 				}
 			}
 		}
@@ -395,34 +392,45 @@ func (j *Job) run(resume bool) {
 	}()
 	return
 }
-func (j *Job) processInjection(i int64, resume *bool) {
+func (j *Job) processInjection(i int64) {
 	var action string
-	orig, msisdn, err := j.nextMsisdn()
+	orig, msisdn, err := j.nextMsisdn(i)
 	defer func() {
 		j.logMsisdn(i, orig, action, err)
 	}()
+	if i < j.Skip {
+		action = "skip"
+		log.WithFields(log.Fields{
+			"reason": err.Error(),
+		}).Warn("skip")
+		return
+	}
+
+	log.WithFields(log.Fields{
+		"idx":        i,
+		"msisdn":     msisdn,
+		"orig":       orig,
+		"skip":       j.Skip,
+		"processsed": j.Processed,
+	}).Debug("consider..")
+	j.Processed = j.Processed + 1
+
+	if err == errPaidInTransactions {
+		action = "skip"
+		log.WithFields(log.Fields{
+			"msisdn": msisdn,
+		}).Warn("already paid")
+		return
+	}
 
 	if err != nil {
 		action = "skip"
-		if err == errPaidInTransactions {
-			log.WithFields(log.Fields{
-				"msisdn": msisdn,
-			}).Warn("already paid")
-			return
-		}
 		log.WithFields(log.Fields{
 			"orig":   orig,
 			"msisdn": msisdn,
 			"error":  err.Error(),
 		}).Error("skip")
 		return
-	}
-	if *resume && i < j.Skip {
-		action = "skip"
-		err = fmt.Errorf("skip until: %d", j.Skip)
-		return
-	} else {
-		*resume = false
 	}
 
 	if _, ok := svc.jobs.cache[j.Id][msisdn]; ok {
@@ -446,20 +454,18 @@ func (j *Job) processInjection(i int64, resume *bool) {
 		CampaignCode:  j.ParsedParams.CampaignCode,
 		ServiceCode:   j.ParsedParams.ServiceCode,
 		OperatorCode:  41001,
+		CountryCode:   92,
 		Msisdn:        msisdn,
 		Tid:           rec.GenerateTID(msisdn),
 		Price:         j.PriceCents,
 		AttemptsCount: 10, // any, just more than 0
+		Type:          "injection",
 	}
 
 	log.WithFields(log.Fields{
 		"tid":    r.Tid,
 		"msisdn": r.Msisdn,
 	}).Info("process")
-
-	r.Type = "injection"
-
-	j.Skip = i
 
 send:
 	if err := j.sendToMobilinkRequests(0, r); err != nil {
@@ -497,7 +503,7 @@ func TrimToNum(r rune) bool {
 
 var errPaidInTransactions = errors.New("Paid in transactions")
 
-func (j *Job) nextMsisdn() (orig, msisdn string, err error) {
+func (j *Job) nextMsisdn(idx int64) (orig, msisdn string, err error) {
 
 	if !j.scanner.Scan() {
 		if err = j.scanner.Err(); err != nil {
@@ -507,7 +513,14 @@ func (j *Job) nextMsisdn() (orig, msisdn string, err error) {
 		// eof
 		return "", "", nil
 	}
+
 	orig = j.scanner.Text()
+
+	if idx < j.Skip {
+		err = fmt.Errorf("%d skip until: %d", idx, j.Skip)
+		return
+	}
+
 	log.WithFields(log.Fields{
 		"original": orig,
 	}).Info("got from file")
@@ -596,9 +609,11 @@ func (j *jobs) stopJob(id int64, status string) error {
 	if err := j.setStatus(id, status); err != nil {
 		return fmt.Errorf("j.setStatus: %s", err.Error())
 	}
-	if err := j.setSkip(svc.jobs.running[id].Skip, id); err != nil {
-		return fmt.Errorf("j.setSkip: %s", err.Error())
-	}
+
+	//skip := svc.jobs.running[id].Skip + svc.jobs.running[id].Processed
+	//if err := j.setSkip(skip, id); err != nil {
+	//	return fmt.Errorf("j.setSkip to %d: %s", skip, err.Error())
+	//}
 
 	delete(svc.jobs.cache, id)
 	delete(svc.jobs.running, id)
@@ -607,6 +622,7 @@ func (j *jobs) stopJob(id int64, status string) error {
 	}).Info("removed from running")
 	return nil
 }
+
 func (j *jobs) stopJobs() {
 	for range time.Tick(time.Second) {
 		for k, _ := range j.running {
@@ -655,6 +671,7 @@ func (j *jobs) getList(status string) (jobs []Job, err error) {
 		"created_at, "+
 		"run_at, "+
 		"type, "+
+		"skip, "+
 		"status, "+
 		"file_name, "+
 		"params "+
@@ -681,6 +698,7 @@ func (j *jobs) getList(status string) (jobs []Job, err error) {
 			&job.CreatedAt,
 			&job.RunAt,
 			&job.Type,
+			&job.Skip,
 			&job.Status,
 			&job.FileName,
 			&job.Params,
@@ -705,6 +723,7 @@ func (j *jobs) get(id int64) (job Job, err error) {
 		"created_at, "+
 		"run_at, "+
 		"type, "+
+		"skip, "+
 		"status, "+
 		"file_name, "+
 		"params "+
@@ -729,6 +748,7 @@ func (j *jobs) get(id int64) (job Job, err error) {
 			&job.CreatedAt,
 			&job.RunAt,
 			&job.Type,
+			&job.Skip,
 			&job.Status,
 			&job.FileName,
 			&job.Params,
