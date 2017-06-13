@@ -31,8 +31,8 @@ publisher:
 
 db:
   conn_ttl: -1
-  max_open_conns: 15
-  max_idle_conns: 10
+  max_open_conns: 3
+  max_idle_conns: 1
   timeout: 30
   name: linkit_dev
   user: linkit
@@ -44,8 +44,8 @@ db:
 
 db_slave:
   conn_ttl: -1
-  max_open_conns: 15
-  max_idle_conns: 10
+  max_open_conns: 3
+  max_idle_conns: 1
   timeout: 30
   name: linkit_dev
   user: linkit
