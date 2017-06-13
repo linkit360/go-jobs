@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"time"
 
-	log "github.com/Sirupsen/logrus"
 	"github.com/jinzhu/configor"
+	log "github.com/sirupsen/logrus"
 
 	"github.com/linkit360/go-jobs/src/config"
 	"github.com/linkit360/go-jobs/src/service"

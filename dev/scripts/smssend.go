@@ -4,9 +4,9 @@ import (
 	"fmt"
 
 	"flag"
-	log "github.com/Sirupsen/logrus"
 	smpp_client "github.com/fiorix/go-smpp/smpp"
 	"github.com/fiorix/go-smpp/smpp/pdu/pdutext"
+	log "github.com/sirupsen/logrus"
 	"time"
 )
 

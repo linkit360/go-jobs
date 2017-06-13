@@ -13,8 +13,8 @@ import (
 	"time"
 	"unicode"
 
-	log "github.com/Sirupsen/logrus"
 	"github.com/gin-gonic/gin"
+	log "github.com/sirupsen/logrus"
 
 	"github.com/linkit360/go-jobs/src/config"
 	mid_client "github.com/linkit360/go-mid/rpcclient"

@@ -8,8 +8,8 @@ import (
 	"os"
 	"time"
 
-	log "github.com/Sirupsen/logrus"
 	"github.com/jinzhu/configor"
+	log "github.com/sirupsen/logrus"
 
 	"github.com/vostrok/dispatcherd/src/rbmq"
 	"github.com/vostrok/utils/rec"

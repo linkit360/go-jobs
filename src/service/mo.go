@@ -8,8 +8,8 @@ import (
 	"sync"
 	"time"
 
-	log "github.com/Sirupsen/logrus"
 	"github.com/gin-gonic/gin"
+	log "github.com/sirupsen/logrus"
 
 	"github.com/linkit360/go-utils/amqp"
 	rec "github.com/linkit360/go-utils/rec"

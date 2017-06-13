@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"time"
 
-	log "github.com/Sirupsen/logrus"
 	"github.com/jinzhu/configor"
+	log "github.com/sirupsen/logrus"
 
 	dbconn "github.com/vostrok/utils/db"
 	logger "github.com/vostrok/utils/log"

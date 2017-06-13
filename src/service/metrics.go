@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"time"
 
-	log "github.com/Sirupsen/logrus"
 	"github.com/prometheus/client_golang/prometheus"
+	log "github.com/sirupsen/logrus"
 
 	"github.com/linkit360/go-jobs/src/config"
 	m "github.com/linkit360/go-utils/metrics"

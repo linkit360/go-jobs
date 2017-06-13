@@ -5,12 +5,12 @@ import (
 	"fmt"
 	"time"
 
-	log "github.com/Sirupsen/logrus"
 	smpp_client "github.com/fiorix/go-smpp/smpp"
 	"github.com/fiorix/go-smpp/smpp/pdu"
 	"github.com/fiorix/go-smpp/smpp/pdu/pdufield"
 	"github.com/fiorix/go-smpp/smpp/pdu/pdutext"
 	"github.com/jinzhu/configor"
+	log "github.com/sirupsen/logrus"
 )
 
 var smppTransceiver *smpp_client.Transceiver

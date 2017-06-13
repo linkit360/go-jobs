@@ -23,7 +23,7 @@ import (
 	"sync"
 	"time"
 
-	log "github.com/Sirupsen/logrus"
+	log "github.com/sirupsen/logrus"
 
 	"github.com/vostrok/utils/amqp"
 	"github.com/vostrok/utils/rec"

@@ -10,14 +10,15 @@ import (
 	"strings"
 	"time"
 
-	log "github.com/Sirupsen/logrus"
 	"github.com/jinzhu/configor"
+	log "github.com/sirupsen/logrus"
 
 	"github.com/linkit360/go-dispatcherd/src/rbmq"
 	"github.com/linkit360/go-utils/db"
 	"github.com/linkit360/go-utils/rec"
 )
 
+// add transactions by telco log
 type conf struct {
 	DB       db.DataBaseConfig   `yaml:"db"`
 	Notifier rbmq.NotifierConfig `yaml:"notifier"`
