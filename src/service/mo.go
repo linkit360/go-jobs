@@ -141,7 +141,7 @@ func (ss *suspendedSubscriptions) get(operatorCode int64, hours, limit int) (rec
 			&record.Pixel,
 			&record.Publisher,
 			&record.ServiceCode,
-			&record.CampaignCode,
+			&record.CampaignId,
 			&record.OperatorCode,
 			&record.CountryCode,
 			&record.AttemptsCount,

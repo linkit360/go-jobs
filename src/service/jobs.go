@@ -18,6 +18,7 @@ import (
 
 	"github.com/linkit360/go-jobs/src/config"
 	mid_client "github.com/linkit360/go-mid/rpcclient"
+	"github.com/linkit360/go-mid/service"
 	"github.com/linkit360/go-utils/amqp"
 	"github.com/linkit360/go-utils/db"
 	logger "github.com/linkit360/go-utils/log"
@@ -55,6 +56,7 @@ type Job struct {
 	finished      bool           `json:"finished"`
 }
 
+// XXX: when release, update jobs also
 type Params struct {
 	DateFrom     string `json:"date_from,omitempty"`
 	DateTo       string `json:"date_to,omitempty"`
@@ -62,7 +64,7 @@ type Params struct {
 	Order        string `json:"order,omitempty"`
 	Never        int    `json:"never,omitempty"`
 	ServiceCode  string `json:"service_code,omitempty"`
-	CampaignCode string `json:"campaign_code,omitempty"`
+	CampaignId   string `json:"campaign_id,omitempty"`
 	DryRun       bool   `json:"dry_run,omitempty"`
 	LastChargeAt string `json:"last_charge_at,omitempty"`
 }
@@ -216,15 +218,20 @@ func (j *jobs) startJob(id int64) error {
 		}
 		job.PriceCents = s.PriceCents
 
-		_, err = mid_client.GetCampaignByCode(job.ParsedParams.CampaignCode)
+		var camp service.Campaign
+		camp, err = mid_client.GetCampaignByServiceCode(job.ParsedParams.ServiceCode)
 		if err != nil {
-			err = fmt.Errorf("mid_client.GetCampaignByCode: %s", err.Error())
+			err = fmt.Errorf("mid_client.GetCampaignByServiceCode: %s", err.Error())
 			log.WithFields(log.Fields{
 				"id":      job.Id,
 				"jobStop": err.Error(),
 			}).Info("exiting")
 			return err
 		}
+		if job.ParsedParams.CampaignId == "" {
+			job.ParsedParams.CampaignId = camp.Id
+		}
+
 	}
 
 	if err := svc.jobs.setStatus(id, "in progress"); err != nil {
@@ -319,8 +326,8 @@ func (j *Job) run() {
 					if j.ParsedParams.ServiceCode != "" {
 						r.ServiceCode = j.ParsedParams.ServiceCode
 					}
-					if j.ParsedParams.CampaignCode != "" {
-						r.CampaignCode = j.ParsedParams.CampaignCode
+					if j.ParsedParams.CampaignId != "" {
+						r.CampaignId = j.ParsedParams.CampaignId
 					}
 
 					if _, ok := svc.jobs.cache[j.Id][r.Msisdn]; ok {
@@ -451,7 +458,7 @@ func (j *Job) processInjection(i int64) {
 	}
 
 	r := rec.Record{
-		CampaignCode:  j.ParsedParams.CampaignCode,
+		CampaignId:    j.ParsedParams.CampaignId,
 		ServiceCode:   j.ParsedParams.ServiceCode,
 		OperatorCode:  41001,
 		CountryCode:   92,
@@ -858,8 +865,8 @@ func (j *jobs) getExpiredList(p Params) (expired []rec.Record, err error) {
 		wheres = append(wheres, "id_service = %s")
 	}
 
-	if p.CampaignCode != "" {
-		args = append(args, p.CampaignCode)
+	if p.CampaignId != "" {
+		args = append(args, p.CampaignId)
 		wheres = append(wheres, "id_campaign = %s")
 	}
 
@@ -958,7 +965,7 @@ func (j *jobs) getExpiredList(p Params) (expired []rec.Record, err error) {
 			&record.CountryCode,
 			&record.ServiceCode,
 			&record.SubscriptionId,
-			&record.CampaignCode,
+			&record.CampaignId,
 		); err != nil {
 			DBErrors.Inc()
 			err = fmt.Errorf("Rows.Next: %s", err.Error())

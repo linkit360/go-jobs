@@ -87,7 +87,7 @@ func main() {
 			CountryCode:    92,
 			ServiceCode:    "111",
 			SubscriptionId: 0,
-			CampaignCode:   "354",
+			CampaignId:     "354",
 			OperatorToken:  "",
 			Price:          600,
 		}
@@ -144,7 +144,7 @@ func writeTransaction(r rec.Record) (err error) {
 		r.CountryCode,
 		r.ServiceCode,
 		r.SubscriptionId,
-		r.CampaignCode,
+		r.CampaignId,
 		r.OperatorToken,
 		int(r.Price),
 	); err != nil {
