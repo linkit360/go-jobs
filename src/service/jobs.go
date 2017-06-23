@@ -214,7 +214,7 @@ func (j *jobs) startJob(id int64) error {
 			}).Info("exiting")
 			return err
 		}
-		job.PriceCents = 100 * int(s.Price)
+		job.PriceCents = s.PriceCents
 
 		_, err = mid_client.GetCampaignByCode(job.ParsedParams.CampaignCode)
 		if err != nil {
