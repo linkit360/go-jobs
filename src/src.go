@@ -33,9 +33,8 @@ func RunServer() {
 	m.AddHandler(r)
 	service.AddSubscriptionsHandler(r)
 	service.AddJobHandlers(r)
-	r.Run(":" + appConfig.Server.Port)
-
-	log.WithField("port", appConfig.Server.Port).Info("init")
+	r.Run(appConfig.Server.Host + ":" + appConfig.Server.Port)
+	log.WithField("dsn", appConfig.Server.Host+":"+appConfig.Server.Port).Info("init")
 }
 
 func OnExit() {
